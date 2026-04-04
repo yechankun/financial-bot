@@ -22,6 +22,7 @@ import {
   handleStockScreenCommand,
   handleStockLookupCommand,
 } from "./handleMarketCommands.js";
+import { handlePlanCommand } from "./handlePlanCommand.js";
 import { handleReportCommand } from "./handleReportCommand.js";
 import { handleSkillsCommand } from "./handleSkillsCommand.js";
 
@@ -60,7 +61,7 @@ function ensureCommandCapability(commandName) {
 }
 
 function shouldConsumeRateLimit(commandName) {
-  return commandName !== "skills";
+  return commandName !== "skills" && commandName !== "plan";
 }
 
 async function enforceRateLimit(interaction) {
@@ -119,6 +120,11 @@ export function createChatCommandHandler({
 
       if (interaction.commandName === "skills") {
         await handleSkillsCommand(interaction);
+        return;
+      }
+
+      if (interaction.commandName === "plan") {
+        await handlePlanCommand(interaction);
         return;
       }
 

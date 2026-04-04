@@ -15,6 +15,7 @@ import {
   buildStockScreenCommandJson,
   buildStockLookupCommandJson,
 } from "./marketCommands.js";
+import { buildPlanCommandJson } from "./planCommand.js";
 import { buildReportCommandJson } from "./reportCommand.js";
 import { buildSkillsCommandJson } from "./skillsCommand.js";
 
@@ -24,6 +25,8 @@ export function buildCommandJson(activeSkills, { internalCommandsEnabled }) {
   if (!internalCommandsEnabled) {
     return commands;
   }
+
+  commands.push(buildPlanCommandJson());
 
   if (canHandleLookupCommands()) {
     commands.push(
