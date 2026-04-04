@@ -1,11 +1,11 @@
 import { internalAppStorage } from "./provider.js";
 
-export async function fetchReportAccessStatus({ discordUserId }) {
-  return internalAppStorage.getReportAccessStatus({ discordUserId });
+export async function fetchReportAccessStatus({ discordUserId, guildId = "" }) {
+  return internalAppStorage.getReportAccessStatus({ discordUserId, guildId });
 }
 
-export async function grantReportAccess({ discordUserId }) {
-  return internalAppStorage.authorizeReportAccess({ discordUserId });
+export async function grantReportAccess({ discordUserId, guildId = "" }) {
+  return internalAppStorage.authorizeReportAccess({ discordUserId, guildId });
 }
 
 export async function fetchScreenPreference({ discordUserId, category }) {

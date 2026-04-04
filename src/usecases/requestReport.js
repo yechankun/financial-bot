@@ -114,6 +114,7 @@ async function handleDispatchedReport({
 
   const accessGrant = await grantReportAccess({
     discordUserId: interaction.user.id,
+    guildId: interaction.guildId || "",
   });
   if (!accessGrant.allowed) {
     await interaction.editReply({
@@ -194,6 +195,7 @@ async function tryServeCachedReport({
 
   const accessGrant = await grantReportAccess({
     discordUserId: interaction.user.id,
+    guildId: interaction.guildId || "",
   });
   if (!accessGrant.allowed) {
     await interaction.editReply({
@@ -239,6 +241,7 @@ export async function requestReport({
 
   const reportAccessStatus = await fetchReportAccessStatus({
     discordUserId: interaction.user.id,
+    guildId: interaction.guildId || "",
   });
   if (!reportAccessStatus.allowed) {
     await interaction.reply({
@@ -334,6 +337,7 @@ export async function requestReport({
 
     const accessGrant = await grantReportAccess({
       discordUserId: interaction.user.id,
+      guildId: interaction.guildId || "",
     });
     if (!accessGrant.allowed) {
       await interaction.editReply({
