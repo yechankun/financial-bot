@@ -11,16 +11,6 @@ export function buildPlanCommandJson() {
     )
     .addSubcommand((subcommand) =>
       subcommand
-        .setName("personal")
-        .setDescription("개인 플랜 결제 링크와 안내를 보여준다냥."),
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("server")
-        .setDescription("서버 플랜 결제 링크와 안내를 보여준다냥."),
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
         .setName("refresh")
         .setDescription("플랜 상태를 다시 확인한다냥."),
     )

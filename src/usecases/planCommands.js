@@ -8,8 +8,6 @@ import {
 import { config } from "../config.js";
 import { fetchReportAccessStatus } from "../gateways/internal/appGateway.js";
 
-const PLAN_REFRESH_BUTTON_ID = "plan:refresh";
-
 function formatQuota(quota) {
   if (!quota) {
     return "현재 구독 quota는 없다냥.";
@@ -47,17 +45,14 @@ function formatAccess(status) {
 function buildPlanText({ status, guildId, view }) {
   const lines = [];
 
-  if (view === "personal") {
-    lines.push("개인 플랜 안내다냥.");
-  } else if (view === "server") {
-    lines.push("서버 플랜 안내다냥.");
-    lines.push(
-      guildId
-        ? `이 서버(\`${guildId}\`)에 서버 구독 quota를 연결할 수 있다냥.`
-        : "서버 텍스트 채널에서 실행하면 서버 플랜 상태를 같이 보여준다냥.",
-    );
+  if (view === "refresh") {
+    lines.push("플랜 상태를 다시 확인했다냥.");
   } else {
     lines.push("현재 플랜 상태다냥.");
+  }
+
+  if (guildId) {
+    lines.push(`현재 서버: \`${guildId}\``);
   }
 
   lines.push(formatAccess(status));
@@ -75,23 +70,13 @@ function buildPlanText({ status, guildId, view }) {
   return lines.join("\n");
 }
 
-function buildPlanComponents({ guildId }) {
-  const personalButton = new ButtonBuilder()
+function buildPlanComponents() {
+  const supportButton = new ButtonBuilder()
     .setStyle(ButtonStyle.Link)
-    .setLabel("개인 플랜 결제")
-  const serverButton = new ButtonBuilder()
-    .setStyle(ButtonStyle.Link)
-  const refreshButton = new ButtonBuilder()
-    .setCustomId(PLAN_REFRESH_BUTTON_ID)
-    .setStyle(ButtonStyle.Secondary)
-    .setLabel("상태 새로고침");
+    .setLabel("후원으로 플랜 이용하기")
 
   return [
-    new ActionRowBuilder().addComponents(
-      personalButton,
-      serverButton,
-      refreshButton,
-    ),
+    new ActionRowBuilder().addComponents(supportButton),
   ];
 }
 
@@ -107,11 +92,7 @@ export async function buildPlanReplyPayload({
 
   return {
     content: buildPlanText({ status, guildId, view }),
-    components: buildPlanComponents({ guildId }),
+    components: buildPlanComponents(),
     flags: MessageFlags.Ephemeral,
   };
-}
-
-export function getPlanRefreshButtonId() {
-  return PLAN_REFRESH_BUTTON_ID;
 }

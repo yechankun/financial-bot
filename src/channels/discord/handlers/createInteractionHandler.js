@@ -1,6 +1,5 @@
 import { handleAutocompleteInteraction } from "../autocomplete/handleAutocompleteInteraction.js";
 import { createChatCommandHandler } from "./chatCommandHandler.js";
-import { handlePlanRefreshButton } from "./handlePlanCommand.js";
 
 export function createInteractionHandler({
   activeChannelRuns,
@@ -16,13 +15,6 @@ export function createInteractionHandler({
   return async function handleInteraction(interaction) {
     if (interaction.isAutocomplete()) {
       await handleAutocompleteInteraction(interaction);
-      return;
-    }
-
-    if (interaction.isButton()) {
-      if (await handlePlanRefreshButton(interaction)) {
-        return;
-      }
       return;
     }
 
