@@ -67,3 +67,31 @@ export async function putReportCache({
     expiresAt,
   });
 }
+
+export async function ingestPaymentEvent({
+  provider,
+  eventId,
+  eventType,
+  scopeType,
+  scopeId,
+  status,
+  tierKey,
+  currentPeriodEnd,
+  providerCustomerId,
+  providerMembershipId,
+  payload,
+}) {
+  return internalAppStorage.ingestPaymentEvent({
+    provider,
+    eventId,
+    eventType,
+    scopeType,
+    scopeId,
+    status,
+    tierKey,
+    currentPeriodEnd,
+    providerCustomerId,
+    providerMembershipId,
+    payload,
+  });
+}
