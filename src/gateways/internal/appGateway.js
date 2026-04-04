@@ -79,6 +79,7 @@ export async function ingestPaymentEvent({
   currentPeriodEnd,
   providerCustomerId,
   providerMembershipId,
+  claimCode,
   payload,
 }) {
   return internalAppStorage.ingestPaymentEvent({
@@ -92,6 +93,33 @@ export async function ingestPaymentEvent({
     currentPeriodEnd,
     providerCustomerId,
     providerMembershipId,
+    claimCode,
     payload,
+  });
+}
+
+export async function issuePlanClaimCode({
+  discordUserId,
+  guildId = "",
+  guildName = "",
+}) {
+  return internalAppStorage.issuePlanClaimCode({
+    discordUserId,
+    guildId,
+    guildName,
+  });
+}
+
+export async function redeemPlanLicense({
+  discordUserId,
+  guildId = "",
+  guildName = "",
+  licenseKey,
+}) {
+  return internalAppStorage.redeemPlanLicense({
+    discordUserId,
+    guildId,
+    guildName,
+    licenseKey,
   });
 }

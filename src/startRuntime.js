@@ -22,6 +22,7 @@ import {
   hasCapability,
   shouldStartDiscordIngress,
 } from "./runtimeCapabilities.js";
+import { startPaymentWebhookServer } from "./payments/startPaymentWebhookServer.js";
 import {
   drainReportJobQueue,
   ensureReportJobQueueDirs,
@@ -38,13 +39,21 @@ function logCapabilityStatus() {
 export async function startRuntime() {
   logCapabilityStatus();
 
+  const paymentWebhookEnabled = hasCapability("payment-webhook");
+  let paymentServer = null;
+  if (paymentWebhookEnabled) {
+    paymentServer = await startPaymentWebhookServer();
+  }
+
   if (shouldStartDiscordIngress()) {
     await startDiscordBot();
-    return;
   }
 
   const providerStatus = getInternalProviderStatus();
   if (!hasInternalProvider()) {
+    if (shouldStartDiscordIngress() || paymentServer) {
+      return;
+    }
     console.warn(
       `Internal provider unavailable for background runtime. requested=${providerStatus.requestedMode} resolved=${providerStatus.resolvedMode} error=${providerStatus.error || "none"}`,
     );
@@ -58,6 +67,9 @@ export async function startRuntime() {
   const collectorEnabled = hasCapability("collector");
 
   if (!chartWorkerEnabled && !reportWorkerEnabled && !benchmarkWorkerEnabled && !collectorEnabled) {
+    if (shouldStartDiscordIngress() || paymentServer) {
+      return;
+    }
     console.log("No background capabilities enabled. Exiting runtime.");
     return;
   }

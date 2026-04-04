@@ -32,6 +32,22 @@ function readOptionalList(name) {
     .filter(Boolean);
 }
 
+function readOptionalJsonObject(name, fallback = {}) {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export const config = {
   discordToken: readRequired("DISCORD_BOT_TOKEN"),
   applicationId: readRequired("DISCORD_APPLICATION_ID"),
@@ -40,6 +56,17 @@ export const config = {
   benchmarkBuyFeeRate: Number(process.env.BENCHMARK_BUY_FEE_RATE || 0.001),
   benchmarkSellFeeRate: Number(process.env.BENCHMARK_SELL_FEE_RATE || 0.001),
   allowedDiscordUserIds: readOptionalList("ALLOWED_DISCORD_USER_IDS"),
+  gumroadProductUrl:
+    process.env.GUMROAD_PRODUCT_URL?.trim() ||
+    "https://yeongkun.gumroad.com/l/cyekst",
+  gumroadClaimFieldName:
+    process.env.GUMROAD_CLAIM_FIELD_NAME?.trim() || "ClaimCode",
+  gumroadPingEnabled: process.env.GUMROAD_PING_ENABLED?.trim() === "true",
+  gumroadPingHost: process.env.GUMROAD_PING_HOST?.trim() || "0.0.0.0",
+  gumroadPingPort: Number(process.env.GUMROAD_PING_PORT || 8787),
+  gumroadPingPath: process.env.GUMROAD_PING_PATH?.trim() || "/gumroad/ping",
+  gumroadPingSecret: process.env.GUMROAD_PING_SECRET?.trim() || "",
+  gumroadTierMap: readOptionalJsonObject("GUMROAD_TIER_MAP_JSON", {}),
   repoDir,
   runtimeRootDir,
   workspaceDir: repoDir,
@@ -75,5 +102,5 @@ export const config = {
   benchmarkActionSchemaPath: path.join(repoDir, "schemas", "benchmark-actions.schema.json"),
   researchSchemaPath: path.join(repoDir, "schemas", "research-output.schema.json"),
   reportSchemaPath: path.join(repoDir, "schemas", "report-output.schema.json"),
-  skillsConfigPath: path.join(repoDir, "config", "skills.json"),
+  skillsConfigPath: path.join(repoDir, "config", "skills.json")
 };

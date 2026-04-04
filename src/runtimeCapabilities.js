@@ -1,5 +1,6 @@
 const ALL_CAPABILITIES = [
   "discord-ingress",
+  "payment-webhook",
   "lookup-commands",
   "report-worker",
   "collector",
@@ -7,7 +8,7 @@ const ALL_CAPABILITIES = [
 ];
 
 const ROLE_CAPABILITIES = {
-  ingress: ["discord-ingress", "lookup-commands"],
+  ingress: ["discord-ingress", "payment-webhook", "lookup-commands"],
   worker: ["report-worker", "ai-trading"],
   collector: ["collector"],
   standalone: ALL_CAPABILITIES,
@@ -79,6 +80,7 @@ export function getCapabilityStatus() {
   return {
     capabilities: getRuntimeCapabilities(),
     shouldStartDiscordIngress: shouldStartDiscordIngress(),
+    handlesPaymentWebhook: hasCapability("payment-webhook"),
     canHandleLookupCommands: canHandleLookupCommands(),
     canHandleReportCommands: canHandleReportCommands(),
     canAcceptReportCommands: canAcceptReportCommands(),
