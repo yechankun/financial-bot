@@ -7,7 +7,9 @@ import { acquireChannelRunLock } from "../channelRunLock.js";
 import { findActiveSkill, loadActiveSkills } from "../skillWhitelist.js";
 import {
   fetchReportAccessStatus,
+  fetchReportCache,
   grantReportAccess,
+  putReportCache,
 } from "../gateways/internal/appGateway.js";
 import {
   loadReportBenchmarkContext,
@@ -38,11 +40,17 @@ import {
   ensureArtifactParentDirs,
   materializeReportArtifacts,
   resolveResearchMarkdown,
+  serializeReportArtifacts,
   validateArtifactPathsExist,
   validateReportArtifacts,
 } from "../shared/reportArtifacts.js";
+import {
+  buildReportCacheDescriptor,
+} from "../shared/reportCache.js";
 import { hasCapability } from "../runtimeCapabilities.js";
 import { enqueueReportJob, waitForReportJobResult } from "../reportJobQueue.js";
+
+const REPORT_CACHE_TTL_MS = 60 * 60 * 1000;
 
 async function waitForMaterializedReportArtifacts(runDir, report, timeoutMs = 60_000) {
   const startedAt = Date.now();
@@ -66,6 +74,7 @@ async function handleDispatchedReport({
   skill,
   question,
   startedAt,
+  cacheDescriptor,
 }) {
   const { runId, runDir } = createReportRun(skill.name);
 
@@ -116,6 +125,23 @@ async function handleDispatchedReport({
   const materializedReport = materializeReportArtifacts(runDir, result.report);
   await waitForMaterializedReportArtifacts(runDir, materializedReport);
 
+  await putReportCache({
+    cacheKey: cacheDescriptor.cacheKey,
+    discordUserId: interaction.user.id,
+    skill: skill.name,
+    questionNormalized: cacheDescriptor.questionNormalized,
+    questionHash: cacheDescriptor.questionHash,
+    marketSnapshotDate: cacheDescriptor.marketSnapshotDate,
+    marketSessionState: cacheDescriptor.marketSessionState,
+    reportMode: cacheDescriptor.reportMode,
+    runDir,
+    result: {
+      report: result.report,
+      metrics: result.metrics || {},
+    },
+    expiresAt: new Date(Date.now() + REPORT_CACHE_TTL_MS).toISOString(),
+  });
+
   const attachments = await loadAttachments(materializedReport.png_paths);
   const finalMessageBase = [
     `리포트 완성이다냥! (${skill.name}, 소요시간: ${formatElapsedDuration(startedAt)})`,
@@ -135,6 +161,62 @@ async function handleDispatchedReport({
         : finalMessage,
     files: attachments,
   });
+}
+
+async function tryServeCachedReport({
+  interaction,
+  skill,
+  cacheDescriptor,
+  startedAt,
+}) {
+  const cache = await fetchReportCache({
+    skill: skill.name,
+    questionNormalized: cacheDescriptor.questionNormalized,
+    marketSnapshotDate: cacheDescriptor.marketSnapshotDate,
+    marketSessionState: cacheDescriptor.marketSessionState,
+    reportMode: cacheDescriptor.reportMode,
+  });
+
+  if (!cache?.result?.report || !cache.run_dir) {
+    return false;
+  }
+
+  const materializedReport = materializeReportArtifacts(
+    cache.run_dir,
+    cache.result.report,
+  );
+
+  try {
+    await validateReportArtifacts(cache.run_dir, materializedReport);
+  } catch {
+    return false;
+  }
+
+  const accessGrant = await grantReportAccess({
+    discordUserId: interaction.user.id,
+  });
+  if (!accessGrant.allowed) {
+    await interaction.editReply({
+      content: accessGrant.reason || "현재 `/report`를 사용할 수 없다냥.",
+    });
+    return true;
+  }
+
+  const attachments = await loadAttachments(materializedReport.png_paths);
+  const finalMessage = [
+    accessGrant.access_type === "free_once_consumed"
+      ? "무료 `/report` 1회를 사용했다냥."
+      : "캐시된 리포트를 바로 꺼내왔다냥.",
+    `리포트 완성이다냥! (${skill.name}, 소요시간: ${formatElapsedDuration(startedAt)})`,
+    buildMetricsLine(cache.result.metrics || {}),
+    "동일 조건의 최근 리포트를 재사용했다냥.",
+  ].join("\n");
+
+  await interaction.editReply({
+    content: finalMessage,
+    files: attachments,
+  });
+  return true;
 }
 
 export async function requestReport({
@@ -188,6 +270,28 @@ export async function requestReport({
 
     await interaction.deferReply();
     const startedAt = Date.now();
+    const {
+      snapshot: benchmarkSnapshot,
+      promptContext: benchmarkContext,
+    } = await loadReportBenchmarkContext();
+    const cacheDescriptor = buildReportCacheDescriptor({
+      skillName: skill.name,
+      question,
+      marketSnapshotDate: benchmarkSnapshot.marketSession?.tradingDate || "",
+      marketSessionState: benchmarkSnapshot.marketSession?.session || "",
+      reportMode: "default",
+    });
+
+    if (
+      await tryServeCachedReport({
+        interaction,
+        skill,
+        cacheDescriptor,
+        startedAt,
+      })
+    ) {
+      return;
+    }
 
     if (!hasCapability("report-worker")) {
       await handleDispatchedReport({
@@ -195,6 +299,7 @@ export async function requestReport({
         skill,
         question,
         startedAt,
+        cacheDescriptor,
       });
       return;
     }
@@ -244,8 +349,6 @@ export async function requestReport({
           : "리포트를 채널에 올리고 있다냥. 아래 메시지를 봐달라냥.",
     });
 
-    const { promptContext: benchmarkContext } =
-      await loadReportBenchmarkContext();
     await ensureArtifactParentDirs(artifactPaths);
 
     let currentProgress = {
@@ -530,6 +633,26 @@ export async function requestReport({
     }
 
     await validateReportArtifacts(runDir, reportJob.result.report);
+    await putReportCache({
+      cacheKey: cacheDescriptor.cacheKey,
+      discordUserId: interaction.user.id,
+      skill: skill.name,
+      questionNormalized: cacheDescriptor.questionNormalized,
+      questionHash: cacheDescriptor.questionHash,
+      marketSnapshotDate: cacheDescriptor.marketSnapshotDate,
+      marketSessionState: cacheDescriptor.marketSessionState,
+      reportMode: cacheDescriptor.reportMode,
+      runDir,
+      result: {
+        report: serializeReportArtifacts(runDir, reportJob.result.report),
+        metrics: {
+          webSearchCount: currentProgress.webSearchCount || 0,
+          financeLookupCount: currentProgress.financeLookupCount || 0,
+          chartAnalysisCount: currentProgress.chartAnalysisCount || 0,
+        },
+      },
+      expiresAt: new Date(Date.now() + REPORT_CACHE_TTL_MS).toISOString(),
+    });
     const postingChannel = await resolvePostingChannel(interaction);
 
     const attachments = await loadAttachments(reportJob.result.report.png_paths);
