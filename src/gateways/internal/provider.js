@@ -170,5 +170,6 @@ export const internalBenchmarkStore = namespaceProxy("internalBenchmarkStore");
 export const internalBenchmarkQueue = namespaceProxy("internalBenchmarkQueue");
 export const internalChartQueue = namespaceProxy("internalChartQueue");
 export const internalChartTool = namespaceProxy("internalChartTool");
+export const internalCollectorRuntime = namespaceProxy("internalCollectorRuntime");
 export const internalAppStorage = namespaceProxy("internalAppStorage");
 export const internalMarketStorage = namespaceProxy("internalMarketStorage");

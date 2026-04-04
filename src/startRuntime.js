@@ -10,6 +10,10 @@ import {
   ensureChartRuntime,
 } from "./gateways/internal/chartGateway.js";
 import {
+  getCollectorStatus,
+  runCollectorTick,
+} from "./gateways/internal/collectorGateway.js";
+import {
   getInternalProviderStatus,
   hasInternalProvider,
 } from "./gateways/internal/provider.js";
@@ -69,8 +73,9 @@ export async function startRuntime() {
   }
 
   if (collectorEnabled) {
+    const collectorStatus = getCollectorStatus();
     console.log(
-      "collector capability is enabled, but collector loop is not wired yet.",
+      `collector capability enabled. tasks=${collectorStatus.tasks.join(", ") || "(none)"} intervalMs=${collectorStatus.intervalMs}`,
     );
   }
 
@@ -97,8 +102,14 @@ export async function startRuntime() {
     if (benchmarkWorkerEnabled) {
       await drainPendingBenchmarkQueue(consumeBenchmarkQueueBatch);
     }
+    if (collectorEnabled) {
+      await runCollectorTick();
+    }
   };
 
+  if (collectorEnabled && getCollectorStatus().runOnStart) {
+    await runCollectorTick({ force: true });
+  }
   await drainQueues();
 
   const pollIntervalMs = Number(process.env.BACKGROUND_POLL_INTERVAL_MS || 5000);

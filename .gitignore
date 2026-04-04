@@ -18,6 +18,7 @@ __pycache__/
 /charts/
 /data/
 /tmp/
+/collector/
 /tmp-render-*/
 /renderer/runs/
 /renderer/node_modules/
