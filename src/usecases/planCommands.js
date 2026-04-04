@@ -42,17 +42,13 @@ function formatAccess(status) {
   }
 }
 
-function buildPlanText({ status, guildId, view }) {
+function buildPlanText({ status, guildId, guildName }) {
   const lines = [];
 
-  if (view === "refresh") {
-    lines.push("플랜 상태를 다시 확인했다냥.");
-  } else {
-    lines.push("현재 플랜 상태다냥.");
-  }
+  lines.push("현재 플랜 상태다냥.");
 
   if (guildId) {
-    lines.push(`현재 서버: \`${guildId}\``);
+    lines.push(`현재 서버: \`${guildName || guildId}\``);
   }
 
   lines.push(formatAccess(status));
@@ -83,7 +79,7 @@ function buildPlanComponents() {
 export async function buildPlanReplyPayload({
   discordUserId,
   guildId,
-  view = "status",
+  guildName = "",
 }) {
   const status = await fetchReportAccessStatus({
     discordUserId,
@@ -91,7 +87,7 @@ export async function buildPlanReplyPayload({
   });
 
   return {
-    content: buildPlanText({ status, guildId, view }),
+    content: buildPlanText({ status, guildId, guildName }),
     components: buildPlanComponents(),
     flags: MessageFlags.Ephemeral,
   };
