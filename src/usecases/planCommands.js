@@ -11,6 +11,8 @@ import {
 import { config } from "../config.js";
 import {
   fetchReportAccessStatus,
+  fetchGuildSubscription,
+  fetchUserSubscription,
   issuePlanClaimCode,
   redeemPlanLicense,
 } from "../gateways/internal/appGateway.js";
@@ -53,6 +55,39 @@ function formatAccess(status) {
   }
 }
 
+function formatInactiveSubscription(status) {
+  const inactive = status.inactive_subscription;
+  if (!inactive) {
+    return "";
+  }
+
+  const scopeLabel =
+    inactive.scope_type === "guild" ? "서버 플랜" : "개인 플랜";
+  const statusLabelMap = {
+    cancellation_pending: "해지 예정",
+    cancelled: "해지됨",
+    refunded: "환불됨",
+    disputed: "분쟁 처리 중",
+    chargebacked: "차지백 처리됨",
+    failed: "결제 실패",
+    expired: "만료됨",
+  };
+  const statusLabel =
+    statusLabelMap[String(inactive.status || "").trim().toLowerCase()] ||
+    String(inactive.status || "비활성");
+
+  const lines = [
+    `최근 ${scopeLabel}: \`${inactive.tier_key}\``,
+    `상태: \`${statusLabel}\``,
+  ];
+
+  if (inactive.current_period_end) {
+    lines.push(`기준 시각: \`${inactive.current_period_end}\``);
+  }
+
+  return lines.join("\n");
+}
+
 function buildPlanText({ status, guildId, guildName }) {
   const lines = [];
 
@@ -64,6 +99,11 @@ function buildPlanText({ status, guildId, guildName }) {
 
   lines.push(formatAccess(status));
   lines.push(formatQuota(status.quota));
+
+  const inactiveSubscriptionText = formatInactiveSubscription(status);
+  if (inactiveSubscriptionText) {
+    lines.push(inactiveSubscriptionText);
+  }
 
   if (!status.quota) {
     const freeUsed = Number(status.report_usage?.free_report_used || 0);
@@ -77,36 +117,93 @@ function buildPlanText({ status, guildId, guildName }) {
   return lines.join("\n");
 }
 
-function buildFallbackPlanUrl() {
-  const url = new URL(config.gumroadProductUrl);
-  if (!url.searchParams.has("wanted")) {
-    url.searchParams.set("wanted", "true");
-  }
-  return url.toString();
+function buildFallbackPlanUrl(baseUrl) {
+  return new URL(baseUrl).toString();
 }
 
-function buildClaimPlanUrl(claimCode) {
-  const url = new URL(config.gumroadProductUrl);
-  if (!url.searchParams.has("wanted")) {
-    url.searchParams.set("wanted", "true");
-  }
+function buildClaimPlanUrl(baseUrl, claimCode) {
+  const url = new URL(baseUrl);
   url.searchParams.set(config.gumroadClaimFieldName, claimCode);
   return url.toString();
 }
 
-function buildPlanComponents(planUrl) {
-  const supportButton = new ButtonBuilder()
+function buildGumroadReceiptUrl(saleId) {
+  const normalizedSaleId = String(saleId || "").trim();
+  if (!normalizedSaleId) {
+    return "";
+  }
+  return `https://gumroad.com/purchases/${encodeURIComponent(normalizedSaleId)}/receipt`;
+}
+
+function isActiveSubscription(subscription) {
+  if (!subscription) {
+    return false;
+  }
+
+  const normalizedStatus = String(subscription.status || "").trim().toLowerCase();
+  if (!["active", "trialing", "cancellation_pending"].includes(normalizedStatus)) {
+    return false;
+  }
+
+  const currentPeriodEnd = String(subscription.current_period_end || "").trim();
+  if (!currentPeriodEnd) {
+    return true;
+  }
+
+  return currentPeriodEnd >= new Date().toISOString();
+}
+
+function buildPlanComponents({
+  personalPlanUrl,
+  guildPlanUrl = "",
+  canPurchaseGuildPlan = false,
+  personalReceiptUrl = "",
+  guildReceiptUrl = "",
+}) {
+  const personalSupportButton = new ButtonBuilder()
     .setStyle(ButtonStyle.Link)
-    .setLabel("후원으로 플랜 이용하기")
-    .setURL(planUrl);
+    .setLabel("개인 플랜 구매")
+    .setURL(personalPlanUrl);
   const redeemButton = new ButtonBuilder()
     .setStyle(ButtonStyle.Secondary)
     .setLabel("라이선스 키 등록")
     .setCustomId(PLAN_REDEEM_BUTTON_ID);
 
-  return [
-    new ActionRowBuilder().addComponents(supportButton, redeemButton),
-  ];
+  const primaryRow = new ActionRowBuilder().addComponents(personalSupportButton);
+  if (canPurchaseGuildPlan && guildPlanUrl) {
+    primaryRow.addComponents(
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel("이 서버 플랜 구매")
+        .setURL(guildPlanUrl),
+    );
+  }
+
+  const rows = [primaryRow];
+
+  const receiptButtons = [];
+  if (personalReceiptUrl) {
+    receiptButtons.push(
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel("개인 영수증 보기")
+        .setURL(personalReceiptUrl),
+    );
+  }
+  if (guildReceiptUrl) {
+    receiptButtons.push(
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel("서버 영수증 보기")
+        .setURL(guildReceiptUrl),
+    );
+  }
+  if (receiptButtons.length > 0) {
+    rows.push(new ActionRowBuilder().addComponents(...receiptButtons));
+  }
+
+  rows.push(new ActionRowBuilder().addComponents(redeemButton));
+  return rows;
 }
 
 export function buildPlanRedeemModal() {
@@ -127,29 +224,78 @@ export async function buildPlanReplyPayload({
   discordUserId,
   guildId,
   guildName = "",
+  canManageGuild = false,
 }) {
-  let planUrl = buildFallbackPlanUrl();
+  let personalPlanUrl = buildFallbackPlanUrl(config.gumroadPersonalProductUrl);
+  let guildPlanUrl = "";
   try {
-    const claim = await issuePlanClaimCode({
+    const personalClaim = await issuePlanClaimCode({
       discordUserId,
+      scopeType: "user",
       guildId,
       guildName,
     });
-    if (claim?.claim_code) {
-      planUrl = buildClaimPlanUrl(claim.claim_code);
+    if (personalClaim?.claim_code) {
+      personalPlanUrl = buildClaimPlanUrl(
+        config.gumroadPersonalProductUrl,
+        personalClaim.claim_code,
+      );
     }
   } catch {
-    planUrl = buildFallbackPlanUrl();
+    personalPlanUrl = buildFallbackPlanUrl(config.gumroadPersonalProductUrl);
+  }
+
+  if (guildId && guildName && canManageGuild && config.gumroadGuildProductUrl) {
+    try {
+      const guildClaim = await issuePlanClaimCode({
+        discordUserId,
+        scopeType: "guild",
+        guildId,
+        guildName,
+      });
+      if (guildClaim?.claim_code) {
+        guildPlanUrl = buildClaimPlanUrl(
+          config.gumroadGuildProductUrl,
+          guildClaim.claim_code,
+        );
+      } else {
+        guildPlanUrl = buildFallbackPlanUrl(config.gumroadGuildProductUrl);
+      }
+    } catch {
+      guildPlanUrl = buildFallbackPlanUrl(config.gumroadGuildProductUrl);
+    }
   }
 
   const status = await fetchReportAccessStatus({
     discordUserId,
     guildId: guildId || "",
   });
+  const [personalSubscription, guildSubscription] = await Promise.all([
+    fetchUserSubscription({ discordUserId }),
+    guildId ? fetchGuildSubscription({ guildId }) : Promise.resolve(null),
+  ]);
+  const personalReceiptUrl =
+    personalSubscription &&
+    personalSubscription.provider === "gumroad" &&
+    isActiveSubscription(personalSubscription)
+      ? buildGumroadReceiptUrl(personalSubscription.provider_sale_id)
+      : "";
+  const guildReceiptUrl =
+    guildSubscription &&
+    guildSubscription.provider === "gumroad" &&
+    isActiveSubscription(guildSubscription)
+      ? buildGumroadReceiptUrl(guildSubscription.provider_sale_id)
+      : "";
 
   return {
     content: buildPlanText({ status, guildId, guildName }),
-    components: buildPlanComponents(planUrl),
+    components: buildPlanComponents({
+      personalPlanUrl,
+      guildPlanUrl,
+      canPurchaseGuildPlan: Boolean(guildId && canManageGuild),
+      personalReceiptUrl,
+      guildReceiptUrl: canManageGuild ? guildReceiptUrl : "",
+    }),
     flags: MessageFlags.Ephemeral,
   };
 }

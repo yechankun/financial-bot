@@ -1,8 +1,9 @@
 import http from "node:http";
+import fs from "node:fs/promises";
 
 import { config } from "../config.js";
 import { ingestPaymentEvent } from "../gateways/internal/appGateway.js";
-import { normalizeGumroadPingPayload } from "./gumroadPing.js";
+import { normalizeGumroadWebhookPayload } from "./gumroadPing.js";
 
 function parseRequestBody(contentType, rawBody) {
   const bodyText = rawBody.toString("utf8");
@@ -52,6 +53,31 @@ function writeJson(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
+async function appendRawPingLog({ request, requestUrl, rawBody, payload, normalized, result, error }) {
+  if (!config.gumroadPingRawLogPath) {
+    return;
+  }
+
+  const entry = {
+    receivedAt: new Date().toISOString(),
+    method: request.method || "",
+    path: requestUrl.pathname,
+    query: Object.fromEntries(requestUrl.searchParams.entries()),
+    headers: request.headers,
+    rawBody: rawBody.toString("utf8"),
+    payload,
+    normalized,
+    result,
+    error: error ? (error instanceof Error ? error.message : String(error)) : "",
+  };
+
+  await fs.appendFile(
+    config.gumroadPingRawLogPath,
+    `${JSON.stringify(entry, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 export async function startPaymentWebhookServer() {
   if (!config.gumroadPingEnabled) {
     return null;
@@ -82,26 +108,48 @@ export async function startPaymentWebhookServer() {
       return;
     }
 
+    let rawBody = Buffer.alloc(0);
+    let payload = {};
+
     try {
       const chunks = [];
       for await (const chunk of request) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
-      const rawBody = Buffer.concat(chunks);
-      const payload = parseRequestBody(request.headers["content-type"], rawBody);
+      rawBody = Buffer.concat(chunks);
+      payload = parseRequestBody(request.headers["content-type"], rawBody);
 
       if (!hasValidSecret({ requestUrl, headers: request.headers, payload })) {
         writeJson(response, 403, { ok: false, error: "invalid_secret" });
         return;
       }
 
-      const normalized = normalizeGumroadPingPayload(payload);
+      const normalized = normalizeGumroadWebhookPayload(payload, {
+        resourceName: requestUrl.searchParams.get("resource_name") || "",
+      });
       const result = await ingestPaymentEvent(normalized);
+      await appendRawPingLog({
+        request,
+        requestUrl,
+        rawBody,
+        payload,
+        normalized,
+        result,
+      });
       writeJson(response, 200, {
         ok: true,
         paymentEvent: result.payment_event,
       });
     } catch (error) {
+      await appendRawPingLog({
+        request,
+        requestUrl,
+        rawBody,
+        payload,
+        normalized: null,
+        result: null,
+        error,
+      }).catch(() => {});
       writeJson(response, 500, {
         ok: false,
         error: error instanceof Error ? error.message : "gumroad_ping_failed",

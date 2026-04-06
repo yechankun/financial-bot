@@ -1,4 +1,5 @@
 import { startDiscordBot } from "./discordBot.js";
+import { config } from "./config.js";
 import {
   createBenchmarkQueueConsumer,
   drainPendingBenchmarkQueue,
@@ -23,6 +24,8 @@ import {
   shouldStartDiscordIngress,
 } from "./runtimeCapabilities.js";
 import { startPaymentWebhookServer } from "./payments/startPaymentWebhookServer.js";
+import { startLocalhostRunTunnel } from "./payments/startLocalhostRunTunnel.js";
+import { syncGumroadResourceSubscriptions } from "./payments/gumroadResourceSubscriptions.js";
 import {
   drainReportJobQueue,
   ensureReportJobQueueDirs,
@@ -41,9 +44,68 @@ export async function startRuntime() {
 
   const paymentWebhookEnabled = hasCapability("payment-webhook");
   let paymentServer = null;
+  let paymentTunnel = null;
+  const shutdownActions = [];
   if (paymentWebhookEnabled) {
     paymentServer = await startPaymentWebhookServer();
+    shutdownActions.push(async () => {
+      await new Promise((resolve) => {
+        paymentServer.close(() => resolve());
+      });
+    });
+    if (config.gumroadPublicBaseUrl) {
+      console.log(
+        `Payment webhook public URL: ${config.gumroadPublicBaseUrl}${config.gumroadPingPath}`,
+      );
+    } else {
+      try {
+        paymentTunnel = await startLocalhostRunTunnel();
+        if (paymentTunnel) {
+          shutdownActions.push(async () => {
+            paymentTunnel.stop();
+          });
+        }
+      } catch (error) {
+        console.error("Payment webhook tunnel start failed:", error);
+      }
+    }
+
+    if (config.gumroadResourceSubscriptionsEnabled) {
+      try {
+        const syncResult = await syncGumroadResourceSubscriptions();
+        for (const item of syncResult.removed || []) {
+          console.log(
+            `Removed Gumroad resource subscription: ${item.resourceName} -> ${item.postUrl}`,
+          );
+        }
+        for (const item of syncResult.synced || []) {
+          console.log(
+            `Gumroad resource subscription ${item.mode}: ${item.resourceName} -> ${item.postUrl}`,
+          );
+        }
+      } catch (error) {
+        console.error("Gumroad resource subscription sync failed:", error);
+      }
+    }
   }
+
+  const runShutdownActions = async () => {
+    for (const action of shutdownActions.reverse()) {
+      try {
+        await action();
+      } catch (error) {
+        console.error("Shutdown cleanup failed:", error);
+      }
+    }
+  };
+
+  const installSimpleShutdownHooks = () => {
+    const shutdown = () => {
+      void runShutdownActions().finally(() => process.exit(0));
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  };
 
   if (shouldStartDiscordIngress()) {
     await startDiscordBot();
@@ -52,6 +114,9 @@ export async function startRuntime() {
   const providerStatus = getInternalProviderStatus();
   if (!hasInternalProvider()) {
     if (shouldStartDiscordIngress() || paymentServer) {
+      if (paymentServer && !shouldStartDiscordIngress()) {
+        installSimpleShutdownHooks();
+      }
       return;
     }
     console.warn(
@@ -68,6 +133,9 @@ export async function startRuntime() {
 
   if (!chartWorkerEnabled && !reportWorkerEnabled && !benchmarkWorkerEnabled && !collectorEnabled) {
     if (shouldStartDiscordIngress() || paymentServer) {
+      if (paymentServer && !shouldStartDiscordIngress()) {
+        installSimpleShutdownHooks();
+      }
       return;
     }
     console.log("No background capabilities enabled. Exiting runtime.");
@@ -138,7 +206,7 @@ export async function startRuntime() {
   await new Promise((resolve) => {
     const shutdown = () => {
       clearInterval(timer);
-      resolve();
+      void runShutdownActions().finally(() => resolve());
     };
 
     process.once("SIGINT", shutdown);

@@ -10,9 +10,14 @@
     "start:package": "INTERNAL_PROVIDER_MODE=package node src/index.js",
     "start:public": "INTERNAL_PROVIDER_MODE=disabled node src/index.js",
     "start:ingress": "BOT_RUNTIME_ROLE=ingress INTERNAL_PROVIDER_MODE=package node src/index.js",
-    "start:mac": "BOT_CAPABILITIES=report-worker,collector,ai-trading INTERNAL_PROVIDER_MODE=package node src/index.js",
+    "start:payment": "BOT_RUNTIME_ROLE=payment INTERNAL_PROVIDER_MODE=package node src/index.js",
+    "start:worker": "BOT_RUNTIME_ROLE=worker INTERNAL_PROVIDER_MODE=package node src/index.js",
+    "start:mac": "BOT_RUNTIME_ROLE=worker INTERNAL_PROVIDER_MODE=package node src/index.js",
+    "start:collector": "BOT_RUNTIME_ROLE=collector INTERNAL_PROVIDER_MODE=package node src/index.js",
     "start:standalone": "BOT_RUNTIME_ROLE=standalone INTERNAL_PROVIDER_MODE=package node src/index.js",
     "check": "find src -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "plan:admin": "node scripts/plan_admin.js",
+    "gumroad:resources:sync": "node scripts/gumroad_resource_subscriptions.js",
     "provider:status": "node --input-type=module -e \"import('./src/gateways/internal/provider.js').then((m) => console.log(JSON.stringify(m.getInternalProviderStatus(), null, 2)))\"",
     "runtime:status": "node --input-type=module -e \"import('./src/runtimeCapabilities.js').then((m) => console.log(JSON.stringify(m.getCapabilityStatus(), null, 2)))\""
   },
@@ -21,15 +26,7 @@
   },
   "dependencies": {
     "discord.js": "^14.21.0",
-    "dotenv": "^17.2.3",
-    "playwright": "^1.56.1",
-    "playwright-core": "^1.58.2",
-    "ws": "^8.18.3"
-  },
-  "devDependencies": {
-    "@types/node": "^24.12.0",
-    "tsx": "^4.21.0",
-    "typescript": "~5.9.3"
+    "dotenv": "^17.2.3"
   },
   "optionalDependencies": {
     "financial-bot-internal": "git+ssh://git@github.com/yechankun/financial-bot-internal.git"

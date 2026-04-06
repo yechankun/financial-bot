@@ -8,8 +8,9 @@ const ALL_CAPABILITIES = [
 ];
 
 const ROLE_CAPABILITIES = {
-  ingress: ["discord-ingress", "payment-webhook", "lookup-commands"],
-  worker: ["report-worker", "ai-trading"],
+  ingress: ["discord-ingress", "lookup-commands"],
+  payment: ["payment-webhook"],
+  worker: ["report-worker", "collector", "ai-trading"],
   collector: ["collector"],
   standalone: ALL_CAPABILITIES,
 };

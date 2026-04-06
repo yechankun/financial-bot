@@ -78,7 +78,10 @@ export async function ingestPaymentEvent({
   tierKey,
   currentPeriodEnd,
   providerCustomerId,
+  customerEmail,
+  customerName,
   providerMembershipId,
+  providerSaleId,
   claimCode,
   payload,
 }) {
@@ -92,19 +95,76 @@ export async function ingestPaymentEvent({
     tierKey,
     currentPeriodEnd,
     providerCustomerId,
+    customerEmail,
+    customerName,
     providerMembershipId,
+    providerSaleId,
     claimCode,
     payload,
   });
 }
 
+export async function fetchUserSubscription({ discordUserId }) {
+  return internalAppStorage.getUserSubscription({ discordUserId });
+}
+
+export async function putUserSubscription({
+  discordUserId,
+  provider,
+  status,
+  tierKey = "individual_basic",
+  currentPeriodEnd = "",
+  providerCustomerId = "",
+  providerMembershipId = "",
+  providerSaleId = "",
+}) {
+  return internalAppStorage.putUserSubscription({
+    discordUserId,
+    provider,
+    status,
+    tierKey,
+    currentPeriodEnd,
+    providerCustomerId,
+    providerMembershipId,
+    providerSaleId,
+  });
+}
+
+export async function fetchGuildSubscription({ guildId }) {
+  return internalAppStorage.getGuildSubscription({ guildId });
+}
+
+export async function putGuildSubscription({
+  guildId,
+  provider,
+  status,
+  tierKey = "guild_basic",
+  currentPeriodEnd = "",
+  providerCustomerId = "",
+  providerMembershipId = "",
+  providerSaleId = "",
+}) {
+  return internalAppStorage.putGuildSubscription({
+    guildId,
+    provider,
+    status,
+    tierKey,
+    currentPeriodEnd,
+    providerCustomerId,
+    providerMembershipId,
+    providerSaleId,
+  });
+}
+
 export async function issuePlanClaimCode({
   discordUserId,
+  scopeType = "user",
   guildId = "",
   guildName = "",
 }) {
   return internalAppStorage.issuePlanClaimCode({
     discordUserId,
+    scopeType,
     guildId,
     guildName,
   });

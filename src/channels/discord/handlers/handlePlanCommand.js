@@ -12,6 +12,9 @@ export async function handlePlanCommand(interaction) {
     discordUserId: interaction.user.id,
     guildId: interaction.guildId || "",
     guildName: interaction.guild?.name || "",
+    canManageGuild:
+      Boolean(interaction.memberPermissions?.has("ManageGuild")) ||
+      Boolean(interaction.memberPermissions?.has("Administrator")),
   });
 
   await interaction.reply(payload);
