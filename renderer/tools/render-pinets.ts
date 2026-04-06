@@ -44,11 +44,11 @@ function invariant(condition: unknown, message: string): asserts condition {
 function buildUsage() {
     return `
 Usage:
-  npm run render -- --source yahoo --symbol EWY --timeframe D --preset ema-cross --out-dir outputs/ewy
-  npm run render -- --source yahoo --symbol EWY --profile trend-stack --out-dir outputs/ewy-profile
-  npm run render -- --source yahoo --symbol KORU --script my-rsi,my-macd --out-dir outputs/koru
-  npm run render -- --source finra --symbol TSLA_SHORT_VOLUME --timeframe D --preset rsi --out-dir outputs/tsla-finra
-  npm run render -- --source yahoo --symbol EWY --code-file ./my-indicator.pine --out-dir outputs/custom
+  bun run render -- --source yahoo --symbol EWY --timeframe D --preset ema-cross --out-dir outputs/ewy
+  bun run render -- --source yahoo --symbol EWY --profile trend-stack --out-dir outputs/ewy-profile
+  bun run render -- --source yahoo --symbol KORU --script my-rsi,my-macd --out-dir outputs/koru
+  bun run render -- --source finra --symbol TSLA_SHORT_VOLUME --timeframe D --preset rsi --out-dir outputs/tsla-finra
+  bun run render -- --source yahoo --symbol EWY --code-file ./my-indicator.pine --out-dir outputs/custom
 `.trim();
 }
 

@@ -33,7 +33,7 @@ This keeps skill activation as a file-based admin action instead of a Discord co
 
 1. Install dependencies.
    ```bash
-   npm install
+   bun install
    ```
    - If the server or local machine has GitHub SSH access, `financial-bot-internal` installs automatically as an optional private dependency.
    - If private dependency install is unavailable, the public repo still installs and can run in public-only mode.
@@ -48,11 +48,11 @@ This keeps skill activation as a file-based admin action instead of a Discord co
 3. Make sure the internal research runtime is available in the execution environment when report generation is enabled.
 4. Check the internal runtime link when needed.
    ```bash
-   npm run provider:status
+   bun run provider:status
    ```
 5. Start the bot.
    ```bash
-   npm start
+   bun run start
    ```
 
 ## Runtime modes

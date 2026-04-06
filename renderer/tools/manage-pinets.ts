@@ -23,15 +23,15 @@ function invariant(condition: unknown, message: string): asserts condition {
 function usage() {
     return `
 Usage:
-  npm run pinets:config -- scripts list
-  npm run pinets:config -- scripts add --id my-rsi --file ./my-rsi.pine --label "My RSI"
-  npm run pinets:config -- scripts update --id my-rsi --file ./my-rsi-v2.pine
-  npm run pinets:config -- scripts delete --id my-rsi
-  npm run pinets:config -- scripts show --id my-rsi
-  npm run pinets:config -- profiles list
-  npm run pinets:config -- profiles upsert --id trend-stack --items preset:ema-cross,custom:my-rsi
-  npm run pinets:config -- profiles show --id trend-stack
-  npm run pinets:config -- profiles delete --id trend-stack
+  bun run pinets:config -- scripts list
+  bun run pinets:config -- scripts add --id my-rsi --file ./my-rsi.pine --label "My RSI"
+  bun run pinets:config -- scripts update --id my-rsi --file ./my-rsi-v2.pine
+  bun run pinets:config -- scripts delete --id my-rsi
+  bun run pinets:config -- scripts show --id my-rsi
+  bun run pinets:config -- profiles list
+  bun run pinets:config -- profiles upsert --id trend-stack --items preset:ema-cross,custom:my-rsi
+  bun run pinets:config -- profiles show --id trend-stack
+  bun run pinets:config -- profiles delete --id trend-stack
 `.trim();
 }
 

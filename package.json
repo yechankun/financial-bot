@@ -4,6 +4,7 @@
   "description": "Financial bot with channel adapters and a private internal runtime package.",
   "type": "module",
   "private": true,
+  "packageManager": "bun@1.3.4",
   "scripts": {
     "start": "node src/index.js",
     "start:auto": "INTERNAL_PROVIDER_MODE=auto node src/index.js",
@@ -29,6 +30,6 @@
     "dotenv": "^17.2.3"
   },
   "optionalDependencies": {
-    "financial-bot-internal": "git+ssh://git@github.com/yechankun/financial-bot-internal.git"
+    "financial-bot-internal": "git+ssh://git@github.com/yechankun/financial-bot-internal.git#1d0c2df5a63df4ca6ae520efa09a22eeb61457de"
   }
 }
