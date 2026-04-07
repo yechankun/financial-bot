@@ -12,8 +12,16 @@ export async function fetchScreenPreference({ discordUserId, category }) {
   return internalAppStorage.loadScreenPreference({ discordUserId, category });
 }
 
+export async function fetchScreenPreferenceBundle({ discordUserId, dataset }) {
+  return internalAppStorage.loadScreenPreferenceBundle({ discordUserId, dataset });
+}
+
 export async function putScreenPreference({ discordUserId, category, criteria }) {
   return internalAppStorage.saveScreenPreference({ discordUserId, category, criteria });
+}
+
+export async function putScreenPreferenceBundle({ discordUserId, dataset, criteria }) {
+  return internalAppStorage.saveScreenPreferenceBundle({ discordUserId, dataset, criteria });
 }
 
 export async function removeScreenPreference({ discordUserId, category }) {

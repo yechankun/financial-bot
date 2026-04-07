@@ -17,14 +17,38 @@ import { handleBenchmarkCommand } from "./handleBenchmarkCommand.js";
 import {
   handleEtfLookupCommand,
   handleEtfScreenCommand,
-  handleEtfScreenPrefCommand,
-  handleEtfScreenSaveCommand,
+  handleEtfScreenCriteriaCommand,
   handleStockScreenCommand,
+  handleStockScreenCriteriaCommand,
   handleStockLookupCommand,
 } from "./handleMarketCommands.js";
 import { handlePlanCommand } from "./handlePlanCommand.js";
 import { handleReportCommand } from "./handleReportCommand.js";
 import { handleSkillsCommand } from "./handleSkillsCommand.js";
+
+function isUnknownInteractionError(error) {
+  return Boolean(error && typeof error === "object" && error.code === 10062);
+}
+
+async function safeReply(interaction, payload) {
+  try {
+    await interaction.reply(payload);
+  } catch (error) {
+    if (!isUnknownInteractionError(error)) {
+      throw error;
+    }
+  }
+}
+
+async function safeEditReply(interaction, payload) {
+  try {
+    await interaction.editReply(payload);
+  } catch (error) {
+    if (!isUnknownInteractionError(error)) {
+      throw error;
+    }
+  }
+}
 
 function ensureAllowedUser(interaction) {
   if (config.allowedDiscordUserIds.length === 0) {
@@ -90,13 +114,11 @@ export function createChatCommandHandler({
     if (existingRun) {
       const message = `이 채널에서는 이미 \`/${existingRun.commandName}\` 실행이 돌아가고 있다냥. 끝난 뒤에 다시 시도해달라냥.`;
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: message }).catch(() => {});
+        await safeEditReply(interaction, { content: message }).catch(() => {});
         return;
       }
 
-      await interaction
-        .reply({ content: message, flags: MessageFlags.Ephemeral })
-        .catch(() => {});
+      await safeReply(interaction, { content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
       return;
     }
 
@@ -111,7 +133,7 @@ export function createChatCommandHandler({
         requiresInternalProvider(interaction.commandName) &&
         !hasInternalProvider()
       ) {
-        await interaction.reply({
+        await safeReply(interaction, {
           content: getInternalUnavailableMessage(),
           flags: MessageFlags.Ephemeral,
         });
@@ -144,16 +166,6 @@ export function createChatCommandHandler({
         return;
       }
 
-      if (interaction.commandName === "etfscreen-save") {
-        await handleEtfScreenSaveCommand(interaction);
-        return;
-      }
-
-      if (interaction.commandName === "etfscreen-pref") {
-        await handleEtfScreenPrefCommand(interaction);
-        return;
-      }
-
       if (interaction.commandName === "etf") {
         await handleEtfLookupCommand(interaction);
         return;
@@ -182,11 +194,11 @@ export function createChatCommandHandler({
       const message =
         error instanceof Error ? error.message : "요청 처리 중 문제가 생겼다냥.";
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: message }).catch(() => {});
+        await safeEditReply(interaction, { content: message }).catch(() => {});
         return;
       }
 
-      await interaction.reply({
+      await safeReply(interaction, {
         content: message,
         flags: MessageFlags.Ephemeral,
       });

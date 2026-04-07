@@ -17,7 +17,9 @@ export async function fetchStockScreen({
   limit,
   criteria,
   industryHighlights,
+  industryOnly,
   industries,
+  usOnly,
   perIndustryLimit,
   maxIndustries,
 }) {
@@ -26,7 +28,9 @@ export async function fetchStockScreen({
     limit,
     criteria,
     industryHighlights,
+    industryOnly,
     industries,
+    usOnly,
     perIndustryLimit,
     maxIndustries,
   });
@@ -42,4 +46,8 @@ export async function fetchStockLookup({ symbol }) {
 
 export async function fetchSymbolAutocomplete({ dataset, query }) {
   return internalMarketStorage.buildSymbolAutocompleteChoices({ dataset, query });
+}
+
+export async function fetchIndustryAutocomplete({ query }) {
+  return internalMarketStorage.buildIndustryAutocompleteChoices({ query });
 }

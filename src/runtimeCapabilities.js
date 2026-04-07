@@ -101,8 +101,6 @@ export function getRequiredCapabilityForCommand(commandName) {
     commandName === "etf" ||
     commandName === "stock" ||
     commandName === "etfscreen" ||
-    commandName === "etfscreen-save" ||
-    commandName === "etfscreen-pref" ||
     commandName === "stockscreen" ||
     commandName === "benchmark"
   ) {

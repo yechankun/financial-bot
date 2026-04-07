@@ -52,15 +52,23 @@ async function resolveSiblingPackageEntry() {
 
 async function tryLoadPackageProvider() {
   const attempts = [];
-
-  if (process.env.INTERNAL_PROVIDER_PACKAGE?.trim()) {
-    attempts.push(process.env.INTERNAL_PROVIDER_PACKAGE.trim());
-  } else {
-    attempts.push(packageSpecifier);
-  }
+  const explicitSpecifier = process.env.INTERNAL_PROVIDER_PACKAGE?.trim() || "";
+  const effectiveSpecifier = explicitSpecifier || packageSpecifier;
 
   const siblingEntry = await resolveSiblingPackageEntry();
-  if (siblingEntry && !attempts.includes(siblingEntry)) {
+  const shouldPreferSibling =
+    Boolean(siblingEntry) &&
+    (!explicitSpecifier || explicitSpecifier === packageSpecifier);
+
+  if (shouldPreferSibling && siblingEntry && !attempts.includes(siblingEntry)) {
+    attempts.push(siblingEntry);
+  }
+
+  if (effectiveSpecifier && !attempts.includes(effectiveSpecifier)) {
+    attempts.push(effectiveSpecifier);
+  }
+
+  if (!shouldPreferSibling && siblingEntry && !attempts.includes(siblingEntry)) {
     attempts.push(siblingEntry);
   }
 

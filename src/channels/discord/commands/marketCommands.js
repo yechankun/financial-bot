@@ -1,46 +1,76 @@
 import { SlashCommandBuilder } from "discord.js";
 
-import { addShareOption } from "./shared.js";
+import { addShareOption, addShareOptionToSubcommand } from "./shared.js";
 
 export function buildEtfScreenCommandJson() {
-  return addShareOption(
-    new SlashCommandBuilder()
-      .setName("etfscreen")
-      .setDescription("ETF DB를 다양한 관점으로 빠르게 스크리닝한다냥.")
-      .addStringOption((option) =>
-        option
-          .setName("category")
-          .setDescription("보고 싶은 분류를 골라달라냥.")
-          .setRequired(true)
-          .addChoices(
-            { name: "개요", value: "overview" },
-            { name: "저평가", value: "undervalued" },
-            { name: "고평가", value: "overvalued" },
-            { name: "이상치", value: "outlier" },
-            { name: "현금흐름 좋음", value: "cashflow_good" },
-            {
-              name: "현금흐름·CAPEX 악화",
-              value: "cashflow_capex_deterioration",
-            },
-            { name: "모멘텀 진행", value: "momentum" },
-          ),
-      )
-      .addIntegerOption((option) =>
-        option
-          .setName("limit")
-          .setDescription("보고 싶은 개수다냥. 기본 5개다냥.")
-          .setMinValue(1)
-          .setMaxValue(10),
-      )
-      .addStringOption((option) =>
-        option
-          .setName("criteria")
-          .setDescription(
-            "개별 카테고리용 JSON: 지표·방향·가중치·필터를 커스텀한다냥.",
+  return new SlashCommandBuilder()
+    .setName("etfscreen")
+    .setDescription("ETF DB를 다양한 관점으로 빠르게 스크리닝한다냥.")
+    .addSubcommand((subcommand) =>
+      addShareOptionToSubcommand(
+        subcommand
+          .setName("list")
+          .setDescription("ETF 스크리닝 결과를 본다냥.")
+          .addStringOption((option) =>
+            option
+              .setName("category")
+              .setDescription("보고 싶은 분류를 골라달라냥.")
+              .setRequired(true)
+              .addChoices(
+                { name: "개요", value: "overview" },
+                { name: "저평가", value: "undervalued" },
+                { name: "고평가", value: "overvalued" },
+                { name: "이상치", value: "outlier" },
+                { name: "현금흐름 좋음", value: "cashflow_good" },
+                {
+                  name: "현금흐름·CAPEX 악화",
+                  value: "cashflow_capex_deterioration",
+                },
+                { name: "모멘텀 진행", value: "momentum" },
+              ),
           )
-          .setMaxLength(4000),
+          .addIntegerOption((option) =>
+            option
+              .setName("limit")
+              .setDescription("보고 싶은 개수다냥. 기본 5개다냥.")
+              .setMinValue(1)
+              .setMaxValue(10),
+          ),
       ),
-  ).toJSON();
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("criteria")
+        .setDescription("ETF 스크린 criteria 전체 또는 개별 항목을 조회·저장한다냥.")
+        .addStringOption((option) =>
+          option
+            .setName("category")
+            .setDescription("비우면 전체 JSON, 고르면 개별 카테고리다냥.")
+            .addChoices(
+              { name: "저평가", value: "undervalued" },
+              { name: "고평가", value: "overvalued" },
+              { name: "이상치", value: "outlier" },
+              { name: "현금흐름 좋음", value: "cashflow_good" },
+              {
+                name: "현금흐름·CAPEX 악화",
+                value: "cashflow_capex_deterioration",
+              },
+              { name: "모멘텀 진행", value: "momentum" },
+            ),
+        )
+        .addBooleanOption((option) =>
+          option
+            .setName("save")
+            .setDescription("ON이면 아래 criteria JSON을 저장한다냥."),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("criteria")
+            .setDescription("저장할 criteria JSON이다냥. save=true일 때만 쓴다냥.")
+            .setMaxLength(4000),
+        ),
+    )
+    .toJSON();
 }
 
 export function buildEtfLookupCommandJson() {
@@ -76,129 +106,177 @@ export function buildStockLookupCommandJson() {
 }
 
 export function buildStockScreenCommandJson() {
-  return addShareOption(
-    new SlashCommandBuilder()
-      .setName("stockscreen")
-      .setDescription("주식 유니버스를 다양한 관점으로 빠르게 스크리닝한다냥.")
-      .addStringOption((option) =>
-        option
-          .setName("category")
-          .setDescription("보고 싶은 분류를 골라달라냥.")
-          .setRequired(true)
-          .addChoices(
-            { name: "저평가", value: "undervalued" },
-            { name: "고평가", value: "overvalued" },
-            { name: "이상치", value: "outlier" },
-            { name: "현금흐름 좋음", value: "cashflow_good" },
-            {
-              name: "현금흐름·CAPEX 악화",
-              value: "cashflow_capex_deterioration",
-            },
-            { name: "모멘텀 진행", value: "momentum" },
+  return new SlashCommandBuilder()
+    .setName("stockscreen")
+    .setDescription("주식 유니버스를 다양한 관점으로 빠르게 스크리닝한다냥.")
+    .addSubcommand((subcommand) =>
+      addShareOptionToSubcommand(
+        subcommand
+          .setName("list")
+          .setDescription("전역 랭킹 형태로 종목을 본다냥.")
+          .addStringOption((option) =>
+            option
+              .setName("category")
+              .setDescription("보고 싶은 분류를 골라달라냥.")
+              .setRequired(true)
+              .addChoices(
+                { name: "ETF 포함 수", value: "etf_included_count" },
+                { name: "ETF 보유 총규모", value: "etf_total_exposure" },
+                { name: "저평가", value: "undervalued" },
+                { name: "고평가", value: "overvalued" },
+                { name: "이상치", value: "outlier" },
+                { name: "현금흐름 좋음", value: "cashflow_good" },
+                {
+                  name: "현금흐름·CAPEX 악화",
+                  value: "cashflow_capex_deterioration",
+                },
+                { name: "모멘텀 진행", value: "momentum" },
+              ),
+          )
+          .addIntegerOption((option) =>
+            option
+              .setName("limit")
+              .setDescription("전역 랭킹에서 보고 싶은 개수다냥. 기본 5개다냥.")
+              .setMinValue(1)
+              .setMaxValue(10),
+          )
+          .addBooleanOption((option) =>
+            option
+              .setName("us-only")
+              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥."),
           ),
-      )
-      .addIntegerOption((option) =>
-        option
-          .setName("limit")
-          .setDescription("전역 랭킹에서 보고 싶은 개수다냥. 기본 5개다냥.")
-          .setMinValue(1)
-          .setMaxValue(10),
-      )
-      .addStringOption((option) =>
-        option
-          .setName("criteria")
-          .setDescription("가중치·필터용 JSON을 커스텀한다냥.")
-          .setMaxLength(4000),
-      )
-      .addBooleanOption((option) =>
-        option
-          .setName("industry_highlights")
-          .setDescription("산업별 대표 종목 묶음으로 보고 싶으면 켜달라냥."),
-      )
-      .addStringOption((option) =>
-        option
-          .setName("industries")
-          .setDescription("특정 산업만 보려면 쉼표로 구분해 적어달라냥.")
-          .setMaxLength(500),
-      )
-      .addIntegerOption((option) =>
-        option
-          .setName("per_industry_limit")
-          .setDescription("산업별로 보여줄 개수다냥. 기본 2개다냥.")
-          .setMinValue(1)
-          .setMaxValue(5),
-      )
-      .addIntegerOption((option) =>
-        option
-          .setName("max_industries")
-          .setDescription("보여줄 산업 수다냥. 기본 5개다냥.")
-          .setMinValue(1)
-          .setMaxValue(10),
       ),
-  ).toJSON();
-}
-
-export function buildEtfScreenSaveCommandJson() {
-  return new SlashCommandBuilder()
-    .setName("etfscreen-save")
-    .setDescription("ETF 스크린 criteria JSON을 내 설정으로 저장한다냥.")
-    .addStringOption((option) =>
-      option
-        .setName("category")
-        .setDescription("저장할 개별 카테고리다냥.")
-        .setRequired(true)
-        .addChoices(
-          { name: "저평가", value: "undervalued" },
-          { name: "고평가", value: "overvalued" },
-          { name: "이상치", value: "outlier" },
-          { name: "현금흐름 좋음", value: "cashflow_good" },
-          {
-            name: "현금흐름·CAPEX 악화",
-            value: "cashflow_capex_deterioration",
-          },
-          { name: "모멘텀 진행", value: "momentum" },
-        ),
     )
-    .addStringOption((option) =>
-      option
+    .addSubcommand((subcommand) =>
+      addShareOptionToSubcommand(
+        subcommand
+          .setName("industry-only")
+          .setDescription("산업 자체를 시총가중 평균 순위로 본다냥.")
+          .addStringOption((option) =>
+            option
+              .setName("category")
+              .setDescription("보고 싶은 분류를 골라달라냥.")
+              .setRequired(true)
+              .addChoices(
+                { name: "ETF 포함 수", value: "etf_included_count" },
+                { name: "ETF 보유 총규모", value: "etf_total_exposure" },
+                { name: "저평가", value: "undervalued" },
+                { name: "고평가", value: "overvalued" },
+                { name: "이상치", value: "outlier" },
+                { name: "현금흐름 좋음", value: "cashflow_good" },
+                {
+                  name: "현금흐름·CAPEX 악화",
+                  value: "cashflow_capex_deterioration",
+                },
+                { name: "모멘텀 진행", value: "momentum" },
+              ),
+          )
+          .addStringOption((option) =>
+            option
+              .setName("industries")
+              .setDescription("특정 산업만 보려면 쉼표로 구분해 적어달라냥.")
+              .setAutocomplete(true)
+              .setMaxLength(500),
+          )
+          .addBooleanOption((option) =>
+            option
+              .setName("us-only")
+              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥."),
+          )
+          .addIntegerOption((option) =>
+            option
+              .setName("max_industries")
+              .setDescription("보여줄 산업 수다냥. 기본 5개, 최대 40개다냥.")
+              .setMinValue(1)
+              .setMaxValue(40),
+          ),
+      ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
         .setName("criteria")
-        .setDescription("저장할 criteria JSON이다냥.")
-        .setRequired(true)
-        .setMaxLength(4000),
-    )
-    .toJSON();
-}
-
-export function buildEtfScreenPrefCommandJson() {
-  return new SlashCommandBuilder()
-    .setName("etfscreen-pref")
-    .setDescription("저장된 ETF 스크린 설정을 확인하거나 지운다냥.")
-    .addStringOption((option) =>
-      option
-        .setName("action")
-        .setDescription("무엇을 할지 골라달라냥.")
-        .setRequired(true)
-        .addChoices(
-          { name: "조회", value: "show" },
-          { name: "삭제", value: "delete" },
+        .setDescription("주식 스크린 criteria 전체 또는 개별 항목을 조회·저장한다냥.")
+        .addStringOption((option) =>
+          option
+            .setName("category")
+            .setDescription("비우면 전체 JSON, 고르면 개별 카테고리다냥.")
+            .addChoices(
+              { name: "ETF 포함 수", value: "etf_included_count" },
+              { name: "ETF 보유 총규모", value: "etf_total_exposure" },
+              { name: "저평가", value: "undervalued" },
+              { name: "고평가", value: "overvalued" },
+              { name: "이상치", value: "outlier" },
+              { name: "현금흐름 좋음", value: "cashflow_good" },
+              {
+                name: "현금흐름·CAPEX 악화",
+                value: "cashflow_capex_deterioration",
+              },
+              { name: "모멘텀 진행", value: "momentum" },
+            ),
+        )
+        .addBooleanOption((option) =>
+          option
+            .setName("save")
+            .setDescription("ON이면 아래 criteria JSON을 저장한다냥."),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("criteria")
+            .setDescription("저장할 criteria JSON이다냥. save=true일 때만 쓴다냥.")
+            .setMaxLength(4000),
         ),
     )
-    .addStringOption((option) =>
-      option
-        .setName("category")
-        .setDescription("조회/삭제할 개별 카테고리다냥.")
-        .setRequired(true)
-        .addChoices(
-          { name: "저평가", value: "undervalued" },
-          { name: "고평가", value: "overvalued" },
-          { name: "이상치", value: "outlier" },
-          { name: "현금흐름 좋음", value: "cashflow_good" },
-          {
-            name: "현금흐름·CAPEX 악화",
-            value: "cashflow_capex_deterioration",
-          },
-          { name: "모멘텀 진행", value: "momentum" },
-        ),
+    .addSubcommand((subcommand) =>
+      addShareOptionToSubcommand(
+        subcommand
+          .setName("industry")
+          .setDescription("산업별 대표 종목 묶음으로 본다냥.")
+          .addStringOption((option) =>
+            option
+              .setName("category")
+              .setDescription("보고 싶은 분류를 골라달라냥.")
+              .setRequired(true)
+              .addChoices(
+                { name: "ETF 포함 수", value: "etf_included_count" },
+                { name: "ETF 보유 총규모", value: "etf_total_exposure" },
+                { name: "저평가", value: "undervalued" },
+                { name: "고평가", value: "overvalued" },
+                { name: "이상치", value: "outlier" },
+                { name: "현금흐름 좋음", value: "cashflow_good" },
+                {
+                  name: "현금흐름·CAPEX 악화",
+                  value: "cashflow_capex_deterioration",
+                },
+                { name: "모멘텀 진행", value: "momentum" },
+              ),
+          )
+          .addStringOption((option) =>
+            option
+              .setName("industries")
+              .setDescription("특정 산업만 보려면 쉼표로 구분해 적어달라냥.")
+              .setAutocomplete(true)
+              .setMaxLength(500),
+          )
+          .addBooleanOption((option) =>
+            option
+              .setName("us-only")
+              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥."),
+          )
+          .addIntegerOption((option) =>
+            option
+              .setName("per_industry_limit")
+              .setDescription("산업별로 보여줄 개수다냥. 기본 2개다냥.")
+              .setMinValue(1)
+              .setMaxValue(5),
+          )
+          .addIntegerOption((option) =>
+            option
+              .setName("max_industries")
+              .setDescription("보여줄 산업 수다냥. 기본 5개, 최대 40개다냥.")
+              .setMinValue(1)
+              .setMaxValue(40),
+          ),
+      ),
     )
     .toJSON();
 }

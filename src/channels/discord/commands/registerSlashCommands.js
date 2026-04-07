@@ -10,8 +10,6 @@ import { buildBenchmarkCommandJson } from "./benchmarkCommand.js";
 import {
   buildEtfLookupCommandJson,
   buildEtfScreenCommandJson,
-  buildEtfScreenPrefCommandJson,
-  buildEtfScreenSaveCommandJson,
   buildStockScreenCommandJson,
   buildStockLookupCommandJson,
 } from "./marketCommands.js";
@@ -31,8 +29,6 @@ export function buildCommandJson(activeSkills, { internalCommandsEnabled }) {
   if (canHandleLookupCommands()) {
     commands.push(
       buildEtfScreenCommandJson(),
-      buildEtfScreenSaveCommandJson(),
-      buildEtfScreenPrefCommandJson(),
       buildEtfLookupCommandJson(),
       buildStockScreenCommandJson(),
       buildStockLookupCommandJson(),
