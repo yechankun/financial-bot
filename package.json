@@ -15,6 +15,8 @@
     "start:worker": "BOT_RUNTIME_ROLE=worker INTERNAL_PROVIDER_MODE=package node src/index.js",
     "start:mac": "BOT_RUNTIME_ROLE=worker INTERNAL_PROVIDER_MODE=package node src/index.js",
     "start:collector": "BOT_RUNTIME_ROLE=collector INTERNAL_PROVIDER_MODE=package node src/index.js",
+    "start:env": "node scripts/run_runtime_with_env.js",
+    "start:collector:env": "node scripts/run_runtime_with_env.js --role collector",
     "start:standalone": "BOT_RUNTIME_ROLE=standalone INTERNAL_PROVIDER_MODE=package node src/index.js",
     "check": "find src -name '*.js' -print0 | xargs -0 -n1 node --check",
     "plan:admin": "node scripts/plan_admin.js",
