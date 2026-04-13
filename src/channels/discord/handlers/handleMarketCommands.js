@@ -19,8 +19,72 @@ function normalizeReplyPayload(payload) {
   return typeof payload === "string" ? { content: payload } : { ...(payload || {}) };
 }
 
+function measureEmbedChars(embed) {
+  const fields = Array.isArray(embed?.fields) ? embed.fields : [];
+  return (
+    String(embed?.title || "").length +
+    String(embed?.description || "").length +
+    String(embed?.footer?.text || "").length +
+    String(embed?.author?.name || "").length +
+    fields.reduce(
+      (sum, field) => sum + String(field?.name || "").length + String(field?.value || "").length,
+      0,
+    )
+  );
+}
+
+function splitPayloadIntoMessages(payload, { maxEmbedChars = 6000, maxEmbeds = 10 } = {}) {
+  const normalized = normalizeReplyPayload(payload);
+  const embeds = Array.isArray(normalized.embeds) ? normalized.embeds : [];
+  if (!embeds.length) {
+    return [normalized];
+  }
+
+  const basePayload = { ...normalized };
+  delete basePayload.embeds;
+
+  const messages = [];
+  let currentEmbeds = [];
+  let currentChars = 0;
+
+  for (const embed of embeds) {
+    const embedChars = measureEmbedChars(embed);
+    const exceedsChars = currentEmbeds.length > 0 && currentChars + embedChars > maxEmbedChars;
+    const exceedsCount = currentEmbeds.length >= maxEmbeds;
+    if (exceedsChars || exceedsCount) {
+      messages.push({ ...basePayload, embeds: currentEmbeds });
+      currentEmbeds = [];
+      currentChars = 0;
+    }
+    currentEmbeds.push(embed);
+    currentChars += embedChars;
+  }
+
+  if (currentEmbeds.length) {
+    messages.push({ ...basePayload, embeds: currentEmbeds });
+  }
+
+  return messages.length ? messages : [normalized];
+}
+
+function isSharedInteraction(interaction) {
+  return interaction.options?.getBoolean("share") ?? false;
+}
+
+async function sendReplyPayload(interaction, payload) {
+  const messages = splitPayloadIntoMessages(payload);
+  const [first, ...rest] = messages;
+  await interaction.editReply(first);
+  const shared = isSharedInteraction(interaction);
+  for (const message of rest) {
+    await interaction.followUp(
+      shared ? message : { ...message, flags: MessageFlags.Ephemeral },
+    );
+  }
+}
+
 async function deferVisibilityReply(interaction) {
-  const share = interaction.options?.getBoolean("share") ?? false;
+  const share = isSharedInteraction(interaction);
   if (share) {
     await interaction.deferReply();
     return;
@@ -73,18 +137,17 @@ export async function handleEtfScreenCommand(interaction) {
   const category = interaction.options.getString("category", true);
   const limit =
     interaction.options.getInteger("limit") ||
-    (category === "overview" ? 2 : 5);
+    (category === "overview" ? 1 : 5);
 
   await deferVisibilityReply(interaction);
-  await interaction.editReply(
-    normalizeReplyPayload(
-      await runEtfScreen({
-        category,
-        limit,
-        criteria: "",
-        discordUserId: interaction.user.id,
-      }),
-    ),
+  await sendReplyPayload(
+    interaction,
+    await runEtfScreen({
+      category,
+      limit,
+      criteria: "",
+      discordUserId: interaction.user.id,
+    }),
   );
 }
 
@@ -166,7 +229,7 @@ export async function handleEtfScreenCriteriaCommand(interaction) {
 export async function handleEtfLookupCommand(interaction) {
   const symbol = interaction.options.getString("symbol", true);
   await deferVisibilityReply(interaction);
-  await interaction.editReply(normalizeReplyPayload(await runEtfLookup({ symbol })));
+  await sendReplyPayload(interaction, await runEtfLookup({ symbol }));
 }
 
 export async function handleStockScreenCommand(interaction) {
@@ -178,43 +241,42 @@ export async function handleStockScreenCommand(interaction) {
   const category = interaction.options.getString("category", true);
   const industryHighlights = subcommand === "industry";
   const industryOnly = subcommand === "industry-only";
+  const isOverview = category === "overview";
   const limit = industryHighlights
     ? 5
-    : interaction.options.getInteger("limit") || 5;
-  const industries = industryHighlights || industryOnly
-    ? interaction.options.getString("industries") || ""
-    : "";
-  const usOnly = interaction.options.getBoolean("us-only") || false;
+    : interaction.options.getInteger("limit") ||
+      (isOverview ? 1 : 5);
+  const industries = interaction.options.getString("industries") || "";
+  const usOnly = interaction.options.getBoolean("us-only");
   const perIndustryLimit = industryHighlights
-    ? interaction.options.getInteger("per_industry_limit") || 2
+    ? interaction.options.getInteger("per_industry_limit") || (isOverview ? 1 : 2)
     : 0;
   const maxIndustries = industryHighlights || industryOnly
-    ? interaction.options.getInteger("max_industries") || 5
+    ? interaction.options.getInteger("max_industries") || (isOverview ? 3 : 5)
     : 5;
 
   await deferVisibilityReply(interaction);
-  await interaction.editReply(
-    normalizeReplyPayload(
-      await runStockScreen({
-        category,
-        limit,
-        criteria: "",
-        discordUserId: interaction.user.id,
-        industryHighlights,
-        industryOnly,
-        industries,
-        usOnly,
-        perIndustryLimit,
-        maxIndustries,
-      }),
-    ),
+  await sendReplyPayload(
+    interaction,
+    await runStockScreen({
+      category,
+      limit,
+      criteria: "",
+      discordUserId: interaction.user.id,
+      industryHighlights,
+      industryOnly,
+      industries,
+      usOnly: usOnly !== false,
+      perIndustryLimit,
+      maxIndustries,
+    }),
   );
 }
 
 export async function handleStockLookupCommand(interaction) {
   const symbol = interaction.options.getString("symbol", true);
   await deferVisibilityReply(interaction);
-  await interaction.editReply(normalizeReplyPayload(await runStockLookup({ symbol })));
+  await sendReplyPayload(interaction, await runStockLookup({ symbol }));
 }
 
 export async function handleStockScreenCriteriaCommand(interaction) {

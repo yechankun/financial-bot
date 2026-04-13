@@ -44,13 +44,13 @@ function isStaleLock(metadata) {
     return true;
   }
 
-  if (isProcessAlive(metadata.pid)) {
-    return false;
+  if (!isProcessAlive(metadata.pid)) {
+    return true;
   }
 
   const startedAt = Number(metadata.startedAt || 0);
   if (!Number.isFinite(startedAt) || startedAt <= 0) {
-    return true;
+    return false;
   }
 
   return Date.now() - startedAt > STALE_LOCK_MAX_AGE_MS;

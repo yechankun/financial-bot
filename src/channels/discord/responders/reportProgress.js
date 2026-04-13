@@ -40,25 +40,79 @@ export function toNyangSentence(text, fallback) {
   return `${source}냥.`;
 }
 
+function formatMultilineNyangText(text, fallback) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return fallback;
+  }
+
+  return lines.map((line) => toNyangSentence(line, fallback)).join("\n");
+}
+
+function normalizeResearchStep(progress) {
+  const rawText = String(progress.activeStepText || "").trim();
+
+  if ((progress.chartAnalysisCount || 0) > 0) {
+    return {
+      activeStepIndex: 3,
+      totalSteps: 3,
+      activeStepText: "최종 확인용 차트를 읽어 crowding과 타이밍을 점검하고 있다",
+    };
+  }
+
+  if (
+    /교차 비교|우선순위|산업·ETF·개별주|기대수익 대비 하방/i.test(rawText)
+  ) {
+    return {
+      activeStepIndex: 2,
+      totalSteps: 3,
+      activeStepText: "후보를 교차 비교해 기대수익 대비 하방 우선순위를 정리하고 있다",
+    };
+  }
+
+  return {
+    activeStepIndex: 1,
+    totalSteps: 3,
+    activeStepText: "산출물을 읽어 현재 레짐과 후보 공급층을 해석하고 있다",
+  };
+}
+
 export function buildProgressMessage(progress) {
+  const normalizedResearchStep =
+    progress.phase === "research" ? normalizeResearchStep(progress) : null;
+  const stepIndex =
+    normalizedResearchStep?.activeStepIndex ?? progress.activeStepIndex;
+  const totalSteps =
+    normalizedResearchStep?.totalSteps ?? progress.totalSteps;
+  const activeStepText =
+    normalizedResearchStep?.activeStepText ?? progress.activeStepText;
   const skillLabel = progress.skillName || "선택한";
   const base =
-    progress.phase === "chart"
-      ? "후보 차트를 만들고 있다냥."
+    progress.phase === "producer"
+      ? "거시경제/기술/재무차트 자료를 수집하고 있다냥."
       : progress.phase === "report"
         ? "최종 보고서를 렌더링중이다냥."
+        : progress.phase === "research"
+          ? `${skillLabel} 스킬로 산출물을 해석하고 있다냥.`
         : `${skillLabel} 스킬을 써서 리포트를 준비한다냥.`;
+  const producerStageLine =
+    progress.phase === "producer" &&
+    Number.isInteger(progress.completedProducerStages) &&
+    Number.isInteger(progress.totalProducerStages)
+      ? `현재 입력층 ${progress.completedProducerStages}/${progress.totalProducerStages}개를 마쳤다냥.`
+      : "";
   const stepLine =
-    Number.isInteger(progress.activeStepIndex) &&
-    Number.isInteger(progress.totalSteps)
-      ? `현재 ${progress.activeStepIndex}/${progress.totalSteps} 단계다냥: ${progress.activeStepText || "진행 중이다냥"}`
-      : progress.phase === "chart"
-        ? toNyangSentence(
-            progress.activeStepText,
-            "후보 차트를 준비하고 있다냥.",
-          )
+    Number.isInteger(stepIndex) &&
+    Number.isInteger(totalSteps)
+      ? `현재 ${stepIndex}/${totalSteps} 단계다냥: ${toNyangSentence(activeStepText, "진행 중이다냥.")}`
+      : activeStepText
+        ? formatMultilineNyangText(activeStepText, "진행 중이다냥.")
         : "";
   const metricsLine = buildMetricsLine(progress);
 
-  return [base, stepLine, metricsLine].filter(Boolean).join("\n");
+  return [base, producerStageLine, stepLine, metricsLine].filter(Boolean).join("\n");
 }

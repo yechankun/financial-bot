@@ -13,6 +13,28 @@ import {
 } from "../gateways/internal/appGateway.js";
 
 const DEFAULT_ETF_SCREEN_CRITERIA = {
+  composite: {
+    score_mode: "weighted_percentile",
+    min_metric_count: 10,
+    reason: "저평가·현금흐름·모멘텀을 함께 만족하는 ETF",
+    metrics: [
+      { key: "aggregate_pe_ttm", label: "PER 연간", higher_better: false, weight: 1 / 3, positive_preferred: true },
+      { key: "aggregate_pb", label: "PBR 분기", higher_better: false, weight: 1 / 3, positive_preferred: true },
+      { key: "aggregate_ps_ttm", label: "PSR 연간", higher_better: false, weight: 1 / 3, positive_preferred: true },
+      { key: "free_cash_flow_to_market_cap_ttm", label: "잉여현금/시총 연간", higher_better: true, weight: 1 / 2, positive_preferred: true },
+      { key: "free_cash_flow_to_revenue_ttm", label: "잉여현금/매출 연간", higher_better: true, weight: 1 / 2, positive_preferred: true },
+      { key: "etf_perf_1m", label: "1개월 수익률", higher_better: true, weight: 0.2 },
+      { key: "etf_perf_3m", label: "3개월 수익률", higher_better: true, weight: 0.2 },
+      { key: "etf_adx", label: "ADX", higher_better: true, weight: 0.2 },
+      { key: "etf_relative_volume_10d", label: "RVOL", higher_better: true, weight: 0.2 },
+      { key: "etf_macd_hist", label: "MACD", higher_better: true, weight: 0.2 },
+    ],
+    bonus_rules: [
+      { key: "etf_rsi", min: 55, max: 75, bonus: 0.08 },
+      { key: "etf_rsi", min: 50, max: 55, bonus: 0.03 },
+      { key: "etf_rsi", min: 75, max: 80, bonus: 0.03 },
+    ],
+  },
   undervalued: {
     score_mode: "weighted_percentile",
     min_metric_count: 3,
@@ -86,6 +108,33 @@ const DEFAULT_ETF_SCREEN_CRITERIA = {
 };
 
 const DEFAULT_STOCK_SCREEN_CRITERIA = {
+  composite: {
+    score_mode: "weighted_percentile",
+    min_metric_count: 15,
+    reason: "ETF 편입·저평가·현금흐름·모멘텀을 함께 만족하는 종목",
+    metrics: [
+      { key: "included_etf_count", label: "포함 ETF 수", higher_better: true, weight: 1.0 },
+      { key: "included_etf_total_exposure", label: "ETF 보유 총규모", higher_better: true, weight: 1.0 },
+      { key: "price_earnings_ttm", label: "PER", higher_better: false, weight: 0.25, positive_preferred: true },
+      { key: "price_book_fq", label: "PBR 분기", higher_better: false, weight: 0.25, positive_preferred: true },
+      { key: "enterprise_value_ebitda_ttm", label: "EV/EBITDA", higher_better: false, weight: 0.25, positive_preferred: true },
+      { key: "price_free_cash_flow_ttm", label: "주가/잉여현금흐름", higher_better: false, weight: 0.25, positive_preferred: true },
+      { key: "free_cash_flow_to_market_cap_ttm", label: "잉여현금/시총 연간", higher_better: true, weight: 0.25, positive_preferred: true },
+      { key: "free_cash_flow_to_revenue_ttm", label: "잉여현금/매출 연간", higher_better: true, weight: 0.25, positive_preferred: true },
+      { key: "operating_margin_ttm", label: "영업이익률", higher_better: true, weight: 0.25, positive_preferred: true },
+      { key: "return_on_equity_fq", label: "ROE", higher_better: true, weight: 0.25, positive_preferred: true },
+      { key: "perf_1m", label: "1개월 수익률", higher_better: true, weight: 0.2 },
+      { key: "perf_3m", label: "3개월 수익률", higher_better: true, weight: 0.2 },
+      { key: "adx", label: "ADX", higher_better: true, weight: 0.2 },
+      { key: "relative_volume_10d", label: "RVOL", higher_better: true, weight: 0.2 },
+      { key: "macd_hist", label: "MACD", higher_better: true, weight: 0.2 },
+    ],
+    bonus_rules: [
+      { key: "rsi", min: 55, max: 75, bonus: 0.08 },
+      { key: "rsi", min: 50, max: 55, bonus: 0.03 },
+      { key: "rsi", min: 75, max: 80, bonus: 0.03 },
+    ],
+  },
   etf_included_count: {
     score_mode: "weighted_percentile",
     min_metric_count: 1,
@@ -274,7 +323,11 @@ export async function runStockScreen({
   maxIndustries,
 }) {
   let effectiveCriteria = criteria;
-  if (!String(criteria || "").trim() && String(discordUserId || "").trim()) {
+  if (
+    category !== "overview" &&
+    !String(criteria || "").trim() &&
+    String(discordUserId || "").trim()
+  ) {
     const savedPreference = await loadScopedScreenPreference({
       discordUserId,
       dataset: "stock",

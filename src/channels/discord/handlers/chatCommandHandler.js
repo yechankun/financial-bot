@@ -111,7 +111,7 @@ export function createChatCommandHandler({
   return async function handleChatInputCommand(interaction) {
     const channelKey = interaction.channelId || "unknown-channel";
     const existingRun = activeChannelRuns.get(channelKey);
-    if (existingRun) {
+    if (interaction.commandName === "report" && existingRun) {
       const message = `이 채널에서는 이미 \`/${existingRun.commandName}\` 실행이 돌아가고 있다냥. 끝난 뒤에 다시 시도해달라냥.`;
       if (interaction.deferred || interaction.replied) {
         await safeEditReply(interaction, { content: message }).catch(() => {});

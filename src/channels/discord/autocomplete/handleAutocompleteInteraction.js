@@ -7,11 +7,18 @@ import { canHandleLookupCommands } from "../../../runtimeCapabilities.js";
 const industryAutocompleteState = new Map();
 
 function buildIndustryAutocompleteStateKey(interaction) {
+  let subcommand = "";
+  try {
+    subcommand = String(interaction.options?.getSubcommand(false) || "");
+  } catch {
+    subcommand = "";
+  }
   return [
     String(interaction.user?.id || ""),
     String(interaction.guildId || ""),
     String(interaction.channelId || ""),
     String(interaction.commandName || ""),
+    subcommand,
     "industries",
   ].join(":");
 }
@@ -31,6 +38,28 @@ function normalizeIndustryAutocompleteQuery(interaction, focusedValue) {
   if (!cached.includes(",")) {
     if (directCandidate) {
       industryAutocompleteState.set(key, directCandidate);
+    } else {
+      industryAutocompleteState.delete(key);
+    }
+    return directCandidate;
+  }
+
+  const cachedParts = cached
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const cachedLastToken = cachedParts.at(-1) || "";
+  const normalizedCurrent = directCandidate.trim();
+  const shouldMerge =
+    !normalizedCurrent ||
+    cachedLastToken.startsWith(normalizedCurrent) ||
+    normalizedCurrent.startsWith(cachedLastToken);
+
+  if (!shouldMerge) {
+    if (directCandidate) {
+      industryAutocompleteState.set(key, directCandidate);
+    } else {
+      industryAutocompleteState.delete(key);
     }
     return directCandidate;
   }

@@ -64,27 +64,35 @@ export function buildResearchArtifactPaths(runDir) {
   );
   return {
     policyMarkdownPath: path.join(producerRoot, "policy", "policy-search.md"),
-    policyFactsPath: path.join(producerRoot, "policy", "policy-facts.json"),
     techSocialMarkdownPath: path.join(
       producerRoot,
       "tech-social",
       "tech-social-search.md",
     ),
-    techSocialSignalsPath: path.join(
+    marketScreenerManifestJsonPath: path.join(
       producerRoot,
-      "tech-social",
-      "theme-signals.json",
+      "market",
+      "market_screener_manifest.json",
     ),
-    scanManifestJsonPath: path.join(producerRoot, "scan", "scan_manifest.json"),
-    scanSummaryMarkdownPath: path.join(
+    marketScreenerSummaryMarkdownPath: path.join(
       producerRoot,
-      "scan",
-      "candidate_summary.md",
+      "market",
+      "market_screener_summary.md",
     ),
     candidateTickersJsonPath: path.join(
       producerRoot,
-      "scan",
+      "market",
       "candidate_tickers.json",
+    ),
+    stockLookupRowsJsonPath: path.join(
+      producerRoot,
+      "market",
+      "stock_lookup_rows.json",
+    ),
+    etfLookupRowsJsonPath: path.join(
+      producerRoot,
+      "market",
+      "etf_lookup_rows.json",
     ),
     candidateChartRootDir: chartRoot,
     candidateChartManifestPath: path.join(chartRoot, "manifest.json"),

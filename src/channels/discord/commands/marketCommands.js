@@ -18,6 +18,7 @@ export function buildEtfScreenCommandJson() {
               .setRequired(true)
               .addChoices(
                 { name: "개요", value: "overview" },
+                { name: "종합 우량", value: "composite" },
                 { name: "저평가", value: "undervalued" },
                 { name: "고평가", value: "overvalued" },
                 { name: "이상치", value: "outlier" },
@@ -32,7 +33,7 @@ export function buildEtfScreenCommandJson() {
           .addIntegerOption((option) =>
             option
               .setName("limit")
-              .setDescription("보고 싶은 개수다냥. 기본 5개다냥.")
+              .setDescription("보고 싶은 개수다냥. 기본 5개다냥. (개요 기본=1개)")
               .setMinValue(1)
               .setMaxValue(10),
           ),
@@ -47,6 +48,7 @@ export function buildEtfScreenCommandJson() {
             .setName("category")
             .setDescription("비우면 전체 JSON, 고르면 개별 카테고리다냥.")
             .addChoices(
+              { name: "종합 우량", value: "composite" },
               { name: "저평가", value: "undervalued" },
               { name: "고평가", value: "overvalued" },
               { name: "이상치", value: "outlier" },
@@ -120,6 +122,8 @@ export function buildStockScreenCommandJson() {
               .setDescription("보고 싶은 분류를 골라달라냥.")
               .setRequired(true)
               .addChoices(
+                { name: "개요", value: "overview" },
+                { name: "종합 우량", value: "composite" },
                 { name: "ETF 포함 수", value: "etf_included_count" },
                 { name: "ETF 보유 총규모", value: "etf_total_exposure" },
                 { name: "저평가", value: "undervalued" },
@@ -136,14 +140,21 @@ export function buildStockScreenCommandJson() {
           .addIntegerOption((option) =>
             option
               .setName("limit")
-              .setDescription("전역 랭킹에서 보고 싶은 개수다냥. 기본 5개다냥.")
+              .setDescription("전역 랭킹에서 보고 싶은 개수다냥. 기본 5개다냥. (개요 기본=1개)")
               .setMinValue(1)
               .setMaxValue(10),
+          )
+          .addStringOption((option) =>
+            option
+              .setName("industries")
+              .setDescription("특정 산업만 보려면 쉼표로 구분해 적어달라냥.")
+              .setAutocomplete(true)
+              .setMaxLength(500),
           )
           .addBooleanOption((option) =>
             option
               .setName("us-only")
-              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥."),
+              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥. 기본 ON이다냥."),
           ),
       ),
     )
@@ -158,6 +169,8 @@ export function buildStockScreenCommandJson() {
               .setDescription("보고 싶은 분류를 골라달라냥.")
               .setRequired(true)
               .addChoices(
+                { name: "개요", value: "overview" },
+                { name: "종합 우량", value: "composite" },
                 { name: "ETF 포함 수", value: "etf_included_count" },
                 { name: "ETF 보유 총규모", value: "etf_total_exposure" },
                 { name: "저평가", value: "undervalued" },
@@ -181,12 +194,12 @@ export function buildStockScreenCommandJson() {
           .addBooleanOption((option) =>
             option
               .setName("us-only")
-              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥."),
+              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥. 기본 ON이다냥."),
           )
           .addIntegerOption((option) =>
             option
               .setName("max_industries")
-              .setDescription("보여줄 산업 수다냥. 기본 5개, 최대 40개다냥.")
+              .setDescription("보여줄 산업 수다냥. 기본 5개, 최대 40개다냥. (개요 기본=3개)")
               .setMinValue(1)
               .setMaxValue(40),
           ),
@@ -201,6 +214,7 @@ export function buildStockScreenCommandJson() {
             .setName("category")
             .setDescription("비우면 전체 JSON, 고르면 개별 카테고리다냥.")
             .addChoices(
+              { name: "종합 우량", value: "composite" },
               { name: "ETF 포함 수", value: "etf_included_count" },
               { name: "ETF 보유 총규모", value: "etf_total_exposure" },
               { name: "저평가", value: "undervalued" },
@@ -237,6 +251,8 @@ export function buildStockScreenCommandJson() {
               .setDescription("보고 싶은 분류를 골라달라냥.")
               .setRequired(true)
               .addChoices(
+                { name: "개요", value: "overview" },
+                { name: "종합 우량", value: "composite" },
                 { name: "ETF 포함 수", value: "etf_included_count" },
                 { name: "ETF 보유 총규모", value: "etf_total_exposure" },
                 { name: "저평가", value: "undervalued" },
@@ -260,19 +276,19 @@ export function buildStockScreenCommandJson() {
           .addBooleanOption((option) =>
             option
               .setName("us-only")
-              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥."),
+              .setDescription("미국 거래소 종목만 미리 걸러서 평가한다냥. 기본 ON이다냥."),
           )
           .addIntegerOption((option) =>
             option
               .setName("per_industry_limit")
-              .setDescription("산업별로 보여줄 개수다냥. 기본 2개다냥.")
+              .setDescription("산업별로 보여줄 개수다냥. 기본 2개다냥. (개요 기본=1개)")
               .setMinValue(1)
               .setMaxValue(5),
           )
           .addIntegerOption((option) =>
             option
               .setName("max_industries")
-              .setDescription("보여줄 산업 수다냥. 기본 5개, 최대 40개다냥.")
+              .setDescription("보여줄 산업 수다냥. 기본 5개, 최대 40개다냥. (개요 기본=3개)")
               .setMinValue(1)
               .setMaxValue(40),
           ),

@@ -11,11 +11,11 @@ import {
   createReportRun,
   runBenchmarkPlanningStage,
   runGuardStage,
+  runMarketScreenerStage,
   runProducerStage,
   runReportStage,
   runResearchStage,
 } from "../gateways/internal/reportGateway.js";
-import { produceCandidateCharts } from "../gateways/internal/chartGateway.js";
 import { internalBenchmarkStore } from "../gateways/internal/provider.js";
 import { hasCapability } from "../runtimeCapabilities.js";
 import { writeReportJobResult } from "../reportJobQueue.js";
@@ -78,8 +78,29 @@ async function executeReportJob({
     financeLookupCount: 0,
     chartAnalysisCount: 0,
   };
+  const producerStageCounts = new Map();
+  const aggregateProducerCounts = () =>
+    [...producerStageCounts.values()].reduce(
+      (totals, counts) => ({
+        webSearchCount: totals.webSearchCount + (counts.webSearchCount || 0),
+        financeLookupCount:
+          totals.financeLookupCount + (counts.financeLookupCount || 0),
+        chartAnalysisCount:
+          totals.chartAnalysisCount + (counts.chartAnalysisCount || 0),
+      }),
+      {
+        webSearchCount: 0,
+        financeLookupCount: 0,
+        chartAnalysisCount: 0,
+      },
+    );
 
   const runProducerStageWithValidation = async ({ stageName, expectedPaths }) => {
+    producerStageCounts.set(stageName, {
+      webSearchCount: 0,
+      financeLookupCount: 0,
+      chartAnalysisCount: 0,
+    });
     const job = await runProducerStage({
       stageName,
       skill,
@@ -103,59 +124,70 @@ async function executeReportJob({
     }
 
     await validateArtifactPathsExist(expectedPaths);
-    aggregateCounts = {
-      webSearchCount:
-        aggregateCounts.webSearchCount + (job.progress?.webSearchCount || 0),
-      financeLookupCount:
-        aggregateCounts.financeLookupCount + (job.progress?.financeLookupCount || 0),
-      chartAnalysisCount:
-        aggregateCounts.chartAnalysisCount + (job.progress?.chartAnalysisCount || 0),
-    };
+    producerStageCounts.set(stageName, {
+      webSearchCount: job.progress?.webSearchCount || 0,
+      financeLookupCount: job.progress?.financeLookupCount || 0,
+      chartAnalysisCount: job.progress?.chartAnalysisCount || 0,
+    });
+    aggregateCounts = aggregateProducerCounts();
   };
 
-  await runProducerStageWithValidation({
-    stageName: "policy-search",
-    expectedPaths: [
-      artifactPaths.policyMarkdownPath,
-      artifactPaths.policyFactsPath,
-    ],
-  });
-  await runProducerStageWithValidation({
-    stageName: "tech-social-search",
-    expectedPaths: [
-      artifactPaths.techSocialMarkdownPath,
-      artifactPaths.techSocialSignalsPath,
-    ],
-  });
-  await runProducerStageWithValidation({
-    stageName: "scan-producer",
-    expectedPaths: [
-      artifactPaths.scanManifestJsonPath,
-      artifactPaths.scanSummaryMarkdownPath,
+  const runMarketScreenerStageWithValidation = async () => {
+    producerStageCounts.set("market-screener", {
+      webSearchCount: 0,
+      financeLookupCount: 0,
+      chartAnalysisCount: 0,
+    });
+
+    const job = await runMarketScreenerStage({
+      artifactPaths,
+      runDir: resolvedRunDir,
+    });
+
+    if (job.code !== 0) {
+      throw new Error(
+        job.stderr || "market screener 단계가 실패했다냥.",
+      );
+    }
+    if (!job.result || job.result.status !== "ok") {
+      throw new Error(
+        job.result?.error || "market screener 결과를 제대로 받지 못했다냥.",
+      );
+    }
+
+    await validateArtifactPathsExist([
+      artifactPaths.marketScreenerManifestJsonPath,
+      artifactPaths.marketScreenerSummaryMarkdownPath,
+      artifactPaths.stockLookupRowsJsonPath,
+      artifactPaths.etfLookupRowsJsonPath,
       artifactPaths.candidateTickersJsonPath,
-    ],
-  });
+    ]);
 
-  const chartCandidates = await produceCandidateCharts({
-    consumeChartQueueBatch,
-    runDir: resolvedRunDir,
-    candidateTickersJsonPath: artifactPaths.candidateTickersJsonPath,
-    outRoot: artifactPaths.candidateChartRootDir,
-    timeframes: ["D"],
-  });
-  await validateArtifactPathsExist([artifactPaths.candidateChartManifestPath]);
-  aggregateCounts = {
-    ...aggregateCounts,
-    chartAnalysisCount:
-      aggregateCounts.chartAnalysisCount + chartCandidates.symbols.length,
+    producerStageCounts.set("market-screener", {
+      webSearchCount: job.progress?.webSearchCount || 0,
+      financeLookupCount: job.progress?.financeLookupCount || 0,
+      chartAnalysisCount: job.progress?.chartAnalysisCount || 0,
+    });
+    aggregateCounts = aggregateProducerCounts();
   };
+
+  await Promise.all([
+    runProducerStageWithValidation({
+      stageName: "policy-search",
+      expectedPaths: [artifactPaths.policyMarkdownPath],
+    }),
+    runProducerStageWithValidation({
+      stageName: "tech-social-search",
+      expectedPaths: [artifactPaths.techSocialMarkdownPath],
+    }),
+    runMarketScreenerStageWithValidation(),
+  ]);
 
   const researchJob = await runResearchStage({
     skill,
     question,
     runDir: resolvedRunDir,
     artifactPaths,
-    benchmarkContext,
   });
   if (researchJob.code !== 0) {
     throw new Error(

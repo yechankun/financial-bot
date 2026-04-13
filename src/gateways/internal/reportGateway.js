@@ -1,12 +1,11 @@
 import path from "node:path";
 
 import { config } from "../../config.js";
-import { internalPrompts, internalResearch } from "./provider.js";
+import { internalMarketStorage, internalPrompts, internalResearch } from "./provider.js";
 
 const PRODUCER_PROMPT_BUILDERS = {
   "policy-search": internalPrompts.buildPolicySearchPrompt,
   "tech-social-search": internalPrompts.buildTechSocialSearchPrompt,
-  "scan-producer": internalPrompts.buildScanProducerPrompt,
 };
 
 export function createReportRun(skillName) {
@@ -49,8 +48,50 @@ export async function runProducerStage({
     schemaPath: config.producerSchemaPath,
     runDir,
     stageName,
+    reasoningEffort: "medium",
     onEvent,
   });
+}
+
+export async function runMarketScreenerStage({
+  artifactPaths,
+  runDir,
+  onEvent,
+}) {
+  onEvent?.({
+    status: "running",
+    activeStepText: "미국 거래소 주식과 ETF의 재무/차트 특징을 정리하고 있다냥.",
+    webSearchCount: 0,
+    financeLookupCount: 0,
+    chartAnalysisCount: 0,
+  });
+
+  const result = await internalMarketStorage.generateReportScreenerArtifacts({
+    artifactPaths,
+    runDir,
+  });
+
+  onEvent?.({
+    status: "completed",
+    activeStepText:
+      result.progress?.activeStepText || "재무/차트 후보 지도를 정리했다냥.",
+    ...(result.progress || {
+      webSearchCount: 0,
+      financeLookupCount: 0,
+      chartAnalysisCount: 0,
+    }),
+  });
+
+  return {
+    code: result.status === "ok" ? 0 : 1,
+    result,
+    progress: result.progress || {
+      webSearchCount: 0,
+      financeLookupCount: 0,
+      chartAnalysisCount: 0,
+    },
+    stderr: result.status === "ok" ? "" : result.error || "market screener stage failed",
+  };
 }
 
 export async function runResearchStage({
@@ -58,7 +99,6 @@ export async function runResearchStage({
   question,
   runDir,
   artifactPaths,
-  benchmarkContext,
   onEvent,
 }) {
   return internalResearch.runResearchJob({
@@ -66,7 +106,6 @@ export async function runResearchStage({
       skill,
       question,
       runDir,
-      benchmarkContext,
       artifactPaths,
     }),
     schemaPath: config.researchSchemaPath,

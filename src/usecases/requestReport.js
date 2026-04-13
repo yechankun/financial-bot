@@ -18,11 +18,11 @@ import {
 import {
   createReportRun,
   runGuardStage,
+  runMarketScreenerStage,
   runProducerStage,
   runReportStage,
   runResearchStage,
 } from "../gateways/internal/reportGateway.js";
-import { produceCandidateCharts } from "../gateways/internal/chartGateway.js";
 import {
   createProgressMessage,
   editProgressMessage,
@@ -272,6 +272,10 @@ export async function requestReport({
     });
 
     await interaction.deferReply();
+    await interaction.editReply({
+      content:
+        "질문 범위와 리포트 실행 가능 여부를 먼저 확인하고 있다냥. 잠시만 기다려달라냥.",
+    });
     const startedAt = Date.now();
     const {
       snapshot: benchmarkSnapshot,
@@ -368,6 +372,12 @@ export async function requestReport({
       financeLookupCount: 0,
       chartAnalysisCount: 0,
     };
+    const producerStageCounts = new Map();
+      const PRODUCER_STAGE_LABELS = {
+      "policy-search": "거시/정책",
+      "tech-social-search": "기술/산업 신호",
+      "market-screener": "재무/차트",
+      };
     let lastPublishedMessage = "";
     let progressUpdateInFlight = false;
     let progressUpdatesEnabled = true;
@@ -415,15 +425,59 @@ export async function requestReport({
     };
 
     try {
+      const getCompletedProducerStages = () =>
+        [...producerStageCounts.values()].filter(
+          (entry) => entry?.status === "completed",
+        ).length;
+      const summarizeProducerActiveStep = () => {
+        const orderedStageNames = [
+          "policy-search",
+          "tech-social-search",
+          "market-screener",
+        ];
+        const visibleEntries = orderedStageNames
+          .map((stageName) => [stageName, producerStageCounts.get(stageName)])
+          .filter(([, entry]) => entry?.status === "running" || entry?.status === "completed");
+        if (visibleEntries.length === 0) {
+          return "입력 산출물을 정리하고 있다냥.";
+        }
+        return visibleEntries
+          .map(([stageName, entry]) => {
+            const label = PRODUCER_STAGE_LABELS[stageName] || stageName;
+            const detail = String(entry.activeStepText || "").trim();
+            return detail
+              ? `${label}: ${toNyangSentence(detail, `${label} 진행 중이다냥.`)}`
+              : `${label}: 진행 중이다냥.`;
+          })
+          .join("\n");
+      };
+      const aggregateProducerCounts = () =>
+        [...producerStageCounts.values()].reduce(
+          (totals, counts) => ({
+            webSearchCount: totals.webSearchCount + (counts.webSearchCount || 0),
+            financeLookupCount:
+              totals.financeLookupCount + (counts.financeLookupCount || 0),
+            chartAnalysisCount:
+              totals.chartAnalysisCount + (counts.chartAnalysisCount || 0),
+          }),
+          {
+            webSearchCount: 0,
+            financeLookupCount: 0,
+            chartAnalysisCount: 0,
+          },
+        );
+
       const runProducerStageWithValidation = async ({
         stageName,
         expectedPaths,
       }) => {
-        let stageCounts = {
+        producerStageCounts.set(stageName, {
+          status: "running",
+          activeStepText: "",
           webSearchCount: 0,
           financeLookupCount: 0,
           chartAnalysisCount: 0,
-        };
+        });
 
         const job = await runProducerStage({
           stageName,
@@ -432,23 +486,23 @@ export async function requestReport({
           artifactPaths,
           runDir,
           onEvent: async (progress) => {
-            stageCounts = {
+            producerStageCounts.set(stageName, {
+              status: progress.status === "completed" ? "completed" : "running",
+              activeStepText: progress.activeStepText || "",
               webSearchCount: progress.webSearchCount || 0,
               financeLookupCount: progress.financeLookupCount || 0,
               chartAnalysisCount: progress.chartAnalysisCount || 0,
-            };
+            });
+            const combinedProducerCounts = aggregateProducerCounts();
             currentProgress = {
-              ...progress,
-              phase: "research",
+              phase: "producer",
               skillName: skill.name,
-              webSearchCount:
-                aggregateCounts.webSearchCount + stageCounts.webSearchCount,
-              financeLookupCount:
-                aggregateCounts.financeLookupCount +
-                stageCounts.financeLookupCount,
-              chartAnalysisCount:
-                aggregateCounts.chartAnalysisCount +
-                stageCounts.chartAnalysisCount,
+              completedProducerStages: getCompletedProducerStages(),
+              totalProducerStages: 3,
+              activeStepText: summarizeProducerActiveStep(),
+              webSearchCount: combinedProducerCounts.webSearchCount,
+              financeLookupCount: combinedProducerCounts.financeLookupCount,
+              chartAnalysisCount: combinedProducerCounts.chartAnalysisCount,
             };
             await publishProgress();
           },
@@ -471,77 +525,111 @@ export async function requestReport({
         }
 
         await validateArtifactPathsExist(expectedPaths);
-        aggregateCounts = {
-          webSearchCount:
-            aggregateCounts.webSearchCount + stageCounts.webSearchCount,
-          financeLookupCount:
-            aggregateCounts.financeLookupCount + stageCounts.financeLookupCount,
-          chartAnalysisCount:
-            aggregateCounts.chartAnalysisCount +
-            stageCounts.chartAnalysisCount,
+        producerStageCounts.set(stageName, {
+          ...(producerStageCounts.get(stageName) || {}),
+          status: "completed",
+        });
+        aggregateCounts = aggregateProducerCounts();
+        currentProgress = {
+          phase: "producer",
+          skillName: skill.name,
+          completedProducerStages: getCompletedProducerStages(),
+          totalProducerStages: 3,
+          activeStepText: summarizeProducerActiveStep(),
+          webSearchCount: aggregateCounts.webSearchCount,
+          financeLookupCount: aggregateCounts.financeLookupCount,
+          chartAnalysisCount: aggregateCounts.chartAnalysisCount,
         };
+        await publishProgress();
       };
 
-      await runProducerStageWithValidation({
-        stageName: "policy-search",
-        expectedPaths: [
-          artifactPaths.policyMarkdownPath,
-          artifactPaths.policyFactsPath,
-        ],
-      });
+      const runMarketScreenerStageWithValidation = async () => {
+        producerStageCounts.set("market-screener", {
+          status: "running",
+          activeStepText: "",
+          webSearchCount: 0,
+          financeLookupCount: 0,
+          chartAnalysisCount: 0,
+        });
 
-      await runProducerStageWithValidation({
-        stageName: "tech-social-search",
-        expectedPaths: [
-          artifactPaths.techSocialMarkdownPath,
-          artifactPaths.techSocialSignalsPath,
-        ],
-      });
+        const job = await runMarketScreenerStage({
+          artifactPaths,
+          runDir,
+          onEvent: async (progress) => {
+            producerStageCounts.set("market-screener", {
+              status: progress.status === "completed" ? "completed" : "running",
+              activeStepText: progress.activeStepText || "",
+              webSearchCount: progress.webSearchCount || 0,
+              financeLookupCount: progress.financeLookupCount || 0,
+              chartAnalysisCount: progress.chartAnalysisCount || 0,
+            });
+            const combinedProducerCounts = aggregateProducerCounts();
+            currentProgress = {
+              phase: "producer",
+              skillName: skill.name,
+              completedProducerStages: getCompletedProducerStages(),
+              totalProducerStages: 3,
+              activeStepText: summarizeProducerActiveStep(),
+              webSearchCount: combinedProducerCounts.webSearchCount,
+              financeLookupCount: combinedProducerCounts.financeLookupCount,
+              chartAnalysisCount: combinedProducerCounts.chartAnalysisCount,
+            };
+            await publishProgress();
+          },
+        });
 
-      await runProducerStageWithValidation({
-        stageName: "scan-producer",
-        expectedPaths: [
-          artifactPaths.scanManifestJsonPath,
-          artifactPaths.scanSummaryMarkdownPath,
+        if (job.code !== 0) {
+          throw new Error(
+            job.stderr || "market screener 단계가 실패했다냥.",
+          );
+        }
+        if (!job.result || job.result.status !== "ok") {
+          throw new Error(
+            job.result?.error || "market screener 결과를 제대로 받지 못했다냥.",
+          );
+        }
+        await validateArtifactPathsExist([
+          artifactPaths.marketScreenerManifestJsonPath,
+          artifactPaths.marketScreenerSummaryMarkdownPath,
+          artifactPaths.stockLookupRowsJsonPath,
+          artifactPaths.etfLookupRowsJsonPath,
           artifactPaths.candidateTickersJsonPath,
-        ],
-      });
-
-      currentProgress = {
-        status: "running",
-        phase: "chart",
-        skillName: skill.name,
-        activeStepIndex: null,
-        totalSteps: null,
-        activeStepText:
-          "후보 티커 JSON을 읽어 일봉과 주봉 차트를 생산하고 있다냥.",
-        webSearchCount: aggregateCounts.webSearchCount,
-        financeLookupCount: aggregateCounts.financeLookupCount,
-        chartAnalysisCount: aggregateCounts.chartAnalysisCount,
+        ]);
+        producerStageCounts.set("market-screener", {
+          ...(producerStageCounts.get("market-screener") || {}),
+          status: "completed",
+        });
+        aggregateCounts = aggregateProducerCounts();
+        currentProgress = {
+          phase: "producer",
+          skillName: skill.name,
+          completedProducerStages: getCompletedProducerStages(),
+          totalProducerStages: 3,
+          activeStepText: summarizeProducerActiveStep(),
+          webSearchCount: aggregateCounts.webSearchCount,
+          financeLookupCount: aggregateCounts.financeLookupCount,
+          chartAnalysisCount: aggregateCounts.chartAnalysisCount,
+        };
+        await publishProgress();
       };
-      await publishProgress();
 
-      const chartCandidates = await produceCandidateCharts({
-        consumeChartQueueBatch,
-        runDir,
-        candidateTickersJsonPath: artifactPaths.candidateTickersJsonPath,
-        outRoot: artifactPaths.candidateChartRootDir,
-        timeframes: ["D"],
-      });
-
-      await validateArtifactPathsExist([artifactPaths.candidateChartManifestPath]);
-      aggregateCounts = {
-        ...aggregateCounts,
-        chartAnalysisCount:
-          aggregateCounts.chartAnalysisCount + chartCandidates.symbols.length,
-      };
+      await Promise.all([
+        runProducerStageWithValidation({
+          stageName: "policy-search",
+          expectedPaths: [artifactPaths.policyMarkdownPath],
+        }),
+        runProducerStageWithValidation({
+          stageName: "tech-social-search",
+          expectedPaths: [artifactPaths.techSocialMarkdownPath],
+        }),
+        runMarketScreenerStageWithValidation(),
+      ]);
 
       researchJob = await runResearchStage({
         skill,
         question,
         runDir,
         artifactPaths,
-        benchmarkContext,
         onEvent: async (progress) => {
           researchPhaseCounts = {
             webSearchCount:
