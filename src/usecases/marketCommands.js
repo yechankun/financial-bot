@@ -99,6 +99,7 @@ const DEFAULT_ETF_SCREEN_CRITERIA = {
     metrics: [
       { key: "etf_perf_1m", label: "1개월 수익률", weight: 1.0 },
       { key: "etf_fund_flows_1m", label: "자금유입 1개월", weight: 1.0 },
+      { key: "etf_fund_flows_3m", label: "자금유입 3개월", weight: 1.0 },
       { key: "etf_atrp", label: "ATRP", weight: 1.0 },
       { key: "aggregate_pe_ttm", label: "PER 연간", weight: 1.0, positive_only: true },
       { key: "aggregate_ps_ttm", label: "PSR 연간", weight: 1.0, positive_only: true },

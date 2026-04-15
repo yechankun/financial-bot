@@ -39,13 +39,49 @@ function logCapabilityStatus() {
   );
 }
 
+function createParentWatchdog() {
+  const parentPid = Number(process.env.BOT_RUNTIME_PARENT_PID || 0);
+  if (!Number.isInteger(parentPid) || parentPid <= 1) {
+    return () => {};
+  }
+
+  const intervalMs = Math.max(
+    1000,
+    Number(process.env.BOT_RUNTIME_PARENT_WATCHDOG_INTERVAL_MS || 2000),
+  );
+  let triggered = false;
+  const timer = setInterval(() => {
+    if (triggered) {
+      return;
+    }
+    if (process.ppid === 1) {
+      triggered = true;
+      console.warn(`Runtime parent missing. shutting down. parentPid=${parentPid}`);
+      process.kill(process.pid, "SIGTERM");
+      return;
+    }
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      triggered = true;
+      console.warn(`Runtime parent unreachable. shutting down. parentPid=${parentPid}`);
+      process.kill(process.pid, "SIGTERM");
+    }
+  }, intervalMs);
+  timer.unref?.();
+
+  return () => {
+    clearInterval(timer);
+  };
+}
+
 export async function startRuntime() {
   logCapabilityStatus();
 
   const paymentWebhookEnabled = hasCapability("payment-webhook");
   let paymentServer = null;
   let paymentTunnel = null;
-  const shutdownActions = [];
+  const shutdownActions = [createParentWatchdog()];
   if (paymentWebhookEnabled) {
     paymentServer = await startPaymentWebhookServer();
     shutdownActions.push(async () => {
