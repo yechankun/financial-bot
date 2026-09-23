@@ -23,7 +23,6 @@
     },
     "actions": {
       "type": "array",
-      "maxItems": 5,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -32,10 +31,11 @@
           "symbol",
           "quantity",
           "price",
-          "price_min",
-          "price_max",
           "description",
           "holding_reason",
+          "investment_reason",
+          "upside_scenario",
+          "exit_points",
           "reason"
         ],
         "properties": {
@@ -58,19 +58,23 @@
             "type": "number",
             "exclusiveMinimum": 0
           },
-          "price_min": {
-            "type": "number",
-            "exclusiveMinimum": 0
-          },
-          "price_max": {
-            "type": "number",
-            "exclusiveMinimum": 0
-          },
           "description": {
             "type": "string",
             "minLength": 1
           },
           "holding_reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "investment_reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "upside_scenario": {
+            "type": "string",
+            "minLength": 1
+          },
+          "exit_points": {
             "type": "string",
             "minLength": 1
           },

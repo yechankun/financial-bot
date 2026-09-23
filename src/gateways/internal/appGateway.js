@@ -76,6 +76,22 @@ export async function putReportCache({
   });
 }
 
+export async function touchUserReportRequest() {
+  return internalAppStorage.touchUserReportRequest();
+}
+
+export async function ensureAutoReportBaseline() {
+  return internalAppStorage.ensureAutoReportBaseline();
+}
+
+export async function claimIdleAutoReport({ idleSeconds, runId }) {
+  return internalAppStorage.claimIdleAutoReport({ idleSeconds, runId });
+}
+
+export async function markAutoReportPosted({ runId }) {
+  return internalAppStorage.markAutoReportPosted({ runId });
+}
+
 export async function ingestPaymentEvent({
   provider,
   eventId,

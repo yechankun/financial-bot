@@ -1,0 +1,68 @@
+//@version=6
+indicator("Financial Assets Composite", "Financial Assets", overlay=false, max_lines_count=500, format=format.volume, precision=2)
+
+period = input.string("FQ", "Period (applies to ALL)", options=["FQ", "FH", "FY"], group="Common")
+
+showAssets = input.bool(true, "Show Total Assets", group="Visibility")
+showEquity = input.bool(true, "Show Total Equity (Net Assets)", group="Visibility")
+
+applySmooth = input.bool(false, "Apply smoothing to ALL series", group="Smoothing (Global)")
+smoothType = input.string("EMA", "Smoothing type", options=["EMA", "SMA"], group="Smoothing (Global)")
+smoothLen = input.int(3, "Smoothing length", minval=1, group="Smoothing (Global)")
+
+maType = input.string("SMA", "MA type", options=["SMA", "EMA"], group="Moving Averages (Global)")
+showShortMA = input.bool(false, "Show short MA", group="Moving Averages (Global)")
+shortLen = input.int(20, "Short MA length", minval=1, group="Moving Averages (Global)")
+showLongMA = input.bool(false, "Show long MA", group="Moving Averages (Global)")
+longLen = input.int(100, "Long MA length", minval=1, group="Moving Averages (Global)")
+
+cAssets = input.color(color.rgb(60, 120, 230), "Total Assets", group="Theme Colors")
+cEquity = input.color(color.rgb(235, 140, 60), "Total Equity", group="Theme Colors")
+
+f_fin(finId) =>
+    request.financial(syminfo.tickerid, finId, period, barmerge.gaps_off, true)
+
+f_ma(src, len) =>
+    maType == "EMA" ? ta.ema(src, len) : ta.sma(src, len)
+
+f_smooth(x) =>
+    applySmooth ? (smoothType == "EMA" ? ta.ema(x, smoothLen) : ta.sma(x, smoothLen)) : x
+
+f_clamp255(v) =>
+    math.min(255.0, math.max(0.0, v))
+
+f_lerp(a, b, t) =>
+    a + (b - a) * t
+
+f_blend(a, b, t) =>
+    r = f_lerp(color.r(a), color.r(b), t)
+    g = f_lerp(color.g(a), color.g(b), t)
+    bl = f_lerp(color.b(a), color.b(b), t)
+    color.rgb(int(math.round(f_clamp255(r))), int(math.round(f_clamp255(g))), int(math.round(f_clamp255(bl))), 0)
+
+shortMAColor(base) =>
+    f_blend(base, color.white, 0.22)
+
+longMAColor(base) =>
+    f_blend(base, color.black, 0.22)
+
+mainStyle = applySmooth ? plot.style_line : plot.style_stepline
+
+assetsRaw = f_fin("TOTAL_ASSETS")
+equityRaw = f_fin("TOTAL_EQUITY")
+
+totalAssets = f_smooth(assetsRaw)
+totalEquity = f_smooth(equityRaw)
+
+assetsS = f_ma(totalAssets, shortLen)
+assetsL = f_ma(totalAssets, longLen)
+equityS = f_ma(totalEquity, shortLen)
+equityL = f_ma(totalEquity, longLen)
+
+plot(showAssets ? totalAssets : na, "Total Assets", cAssets, linewidth=2, style=mainStyle)
+plot(showAssets and showShortMA ? assetsS : na, "Total Assets — Short MA", shortMAColor(cAssets), linewidth=1)
+plot(showAssets and showLongMA ? assetsL : na, "Total Assets — Long MA", longMAColor(cAssets), linewidth=1)
+
+plot(showEquity ? totalEquity : na, "Total Equity", cEquity, linewidth=2, style=mainStyle)
+plot(showEquity and showShortMA ? equityS : na, "Total Equity — Short MA", shortMAColor(cEquity), linewidth=1)
+plot(showEquity and showLongMA ? equityL : na, "Total Equity — Long MA", longMAColor(cEquity), linewidth=1)

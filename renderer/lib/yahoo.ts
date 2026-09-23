@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { promisify } from 'node:util';
+
+import { readIndependentMarketSnapshot as readLocalMarketSnapshot } from './independent-market-db';
+import { readYahooCache, writeYahooCache } from './cache-db';
+import { toYahooShareClassSymbol } from './symbols';
 
 export type YahooSplitEvent = {
     time: number;
@@ -38,7 +40,6 @@ export type YahooFinancialPoint = {
 export type YahooFinancialCatalog = Record<YahooFinancialMetric, Record<YahooFinancialPeriod, YahooFinancialPoint[]>>;
 type YahooFinancialCatalogCache = YahooFinancialCatalog & { cacheVersion: number };
 
-const YAHOO_CACHE_DIR = path.join('.pinets', 'cache', 'yahoo');
 const YAHOO_PAGE_TTL_MS = 12 * 60 * 60 * 1000;
 const YAHOO_SPLITS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const YAHOO_SNAPSHOT_CACHE_VERSION = 3;
@@ -51,43 +52,9 @@ const execFileAsync = promisify(execFile);
 
 export function normalizeYahooLookupSymbol(symbol: string) {
     const normalized = symbol.replace(/^FINRA:/i, '').replace(/^.*:/, '').trim().toUpperCase();
-    return normalized
-        .replace(/_(SHORT_VOLUME|SHORT_EXEMPT_VOLUME|TOTAL_VOLUME|SHORT_RATIO)$/i, '')
-        .split(/[/.:-]/)[0]
-        .trim()
-        .toUpperCase();
-}
-
-async function ensureCacheDir(baseDir: string) {
-    const cacheDir = path.resolve(baseDir, YAHOO_CACHE_DIR);
-    await fs.mkdir(cacheDir, { recursive: true });
-    return cacheDir;
-}
-
-async function readFreshCache<T>(cachePath: string, maxAgeMs: number): Promise<T | null> {
-    try {
-        const stats = await fs.stat(cachePath);
-        if (Date.now() - stats.mtimeMs > maxAgeMs) return null;
-        const text = await fs.readFile(cachePath, 'utf8');
-        return JSON.parse(text) as T;
-    } catch (error) {
-        if ((error as { code?: string }).code === 'ENOENT') return null;
-        if (error instanceof SyntaxError) return null;
-        throw error;
-    }
-}
-
-async function writeCache(cachePath: string, value: unknown) {
-    const tempPath = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
-    const payload = JSON.stringify(value, null, 2);
-    await fs.writeFile(tempPath, payload, 'utf8');
-
-    try {
-        await fs.rename(tempPath, cachePath);
-    } catch (error) {
-        await fs.rm(tempPath, { force: true }).catch(() => {});
-        throw error;
-    }
+    return toYahooShareClassSymbol(
+        normalized.replace(/_(SHORT_VOLUME|SHORT_EXEMPT_VOLUME|TOTAL_VOLUME|SHORT_RATIO)$/i, '').trim().toUpperCase(),
+    );
 }
 
 function formatRequestError(error: unknown) {
@@ -110,6 +77,7 @@ function sleep(ms: number) {
 
 async function fetchYahooTextViaNode(url: string) {
     const response = await fetch(url, {
+        signal: AbortSignal.timeout(20_000),
         headers: {
             'user-agent': YAHOO_USER_AGENT,
             accept: YAHOO_ACCEPT_HEADER,
@@ -223,10 +191,25 @@ function mapYahooInstrumentType(type: string | null) {
 
 export async function fetchYahooSymbolSnapshot(baseDir: string, symbolInput: string): Promise<YahooSymbolSnapshot> {
     const symbol = normalizeYahooLookupSymbol(symbolInput);
-    const cacheDir = await ensureCacheDir(baseDir);
-    const cachePath = path.join(cacheDir, `${symbol}-snapshot.json`);
-    const cached = await readFreshCache<YahooSymbolSnapshot>(cachePath, YAHOO_PAGE_TTL_MS);
-    if (cached?.cacheVersion === YAHOO_SNAPSHOT_CACHE_VERSION) return cached;
+    const localSnapshot = readLocalMarketSnapshot(baseDir, symbol);
+    if (localSnapshot) {
+        const snapshot: YahooSymbolSnapshot = {
+            cacheVersion: YAHOO_SNAPSHOT_CACHE_VERSION,
+            symbol,
+            instrumentType: localSnapshot.kind === 'fund' ? 'ETF' : 'EQUITY',
+            syminfoType: localSnapshot.kind === 'fund' ? 'fund' : 'stock',
+            regularMarketPrice: localSnapshot.regularMarketPrice,
+            navPrice: localSnapshot.navPrice,
+            marketCap: localSnapshot.marketCap,
+            sharesOutstanding: localSnapshot.sharesOutstanding,
+            totalAssets: localSnapshot.totalAssets,
+        };
+        await writeYahooCache(baseDir, 'yahoo_snapshot_cache', symbol, snapshot, YAHOO_PAGE_TTL_MS, YAHOO_SNAPSHOT_CACHE_VERSION);
+        return snapshot;
+    }
+
+    const cached = await readYahooCache<YahooSymbolSnapshot>(baseDir, 'yahoo_snapshot_cache', symbol);
+    if (cached?.cacheVersion === YAHOO_SNAPSHOT_CACHE_VERSION) return cached.payload;
 
     const html = await fetchYahooQuoteHtml(symbol);
     const summary = extractQuoteSummaryPayload(html, symbol);
@@ -253,16 +236,14 @@ export async function fetchYahooSymbolSnapshot(baseDir: string, symbolInput: str
         totalAssets,
     };
 
-    await writeCache(cachePath, snapshot);
+    await writeYahooCache(baseDir, 'yahoo_snapshot_cache', symbol, snapshot, YAHOO_PAGE_TTL_MS, YAHOO_SNAPSHOT_CACHE_VERSION);
     return snapshot;
 }
 
 export async function fetchYahooSplits(baseDir: string, symbolInput: string): Promise<YahooSplitEvent[]> {
     const symbol = normalizeYahooLookupSymbol(symbolInput);
-    const cacheDir = await ensureCacheDir(baseDir);
-    const cachePath = path.join(cacheDir, `${symbol}-splits.json`);
-    const cached = await readFreshCache<YahooSplitEvent[]>(cachePath, YAHOO_SPLITS_TTL_MS);
-    if (cached) return cached;
+    const cached = await readYahooCache<YahooSplitEvent[]>(baseDir, 'yahoo_splits_cache', symbol);
+    if (cached) return cached.payload;
 
     const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`);
     url.searchParams.set('interval', '1d');
@@ -292,7 +273,7 @@ export async function fetchYahooSplits(baseDir: string, symbolInput: string): Pr
         .filter((event) => Number.isFinite(event.time) && Number.isFinite(event.numerator) && Number.isFinite(event.denominator))
         .sort((a, b) => a.time - b.time);
 
-    await writeCache(cachePath, splits);
+    await writeYahooCache(baseDir, 'yahoo_splits_cache', symbol, splits, YAHOO_SPLITS_TTL_MS);
     return splits;
 }
 
@@ -380,19 +361,80 @@ function buildTrailingReturnSeries(numeratorPoints: YahooFinancialPoint[], denom
 
 export async function fetchYahooFinancialCatalog(baseDir: string, symbolInput: string): Promise<YahooFinancialCatalog> {
     const symbol = normalizeYahooLookupSymbol(symbolInput);
-    const cacheDir = await ensureCacheDir(baseDir);
-    const cachePath = path.join(cacheDir, `${symbol}-financials.json`);
-    const cached = await readFreshCache<YahooFinancialCatalogCache>(cachePath, YAHOO_PAGE_TTL_MS);
-    if (cached?.cacheVersion === YAHOO_FINANCIAL_CACHE_VERSION) {
+    const localSnapshot = readLocalMarketSnapshot(baseDir, symbol);
+    if (localSnapshot) {
+        // Local cache snapshot values are not historical timeseries points.
+        // Anchor them at 0 so Pine request.financial can reuse the latest cached
+        // value across the visible chart window instead of returning NaN until
+        // the exact snapshot timestamp is reached.
+        const pointTime = 0;
+        const flatPoint = (value: number | null) =>
+            value != null && Number.isFinite(value) ? [{ time: pointTime, value }] : [];
+        const catalog: YahooFinancialCatalogCache = {
+            cacheVersion: YAHOO_FINANCIAL_CACHE_VERSION,
+            AUM:
+                localSnapshot.kind === 'fund'
+                    ? { D: flatPoint(localSnapshot.totalAssets), FQ: flatPoint(localSnapshot.totalAssets), FH: flatPoint(localSnapshot.totalAssets), FY: flatPoint(localSnapshot.totalAssets) }
+                    : { D: [], FQ: [], FH: [], FY: [] },
+            NAV:
+                localSnapshot.kind === 'fund'
+                    ? { D: flatPoint(localSnapshot.navPrice), FQ: flatPoint(localSnapshot.navPrice), FH: flatPoint(localSnapshot.navPrice), FY: flatPoint(localSnapshot.navPrice) }
+                    : { D: [], FQ: [], FH: [], FY: [] },
+            NAV_ALL:
+                localSnapshot.kind === 'fund'
+                    ? { D: flatPoint(localSnapshot.navPrice), FQ: flatPoint(localSnapshot.navPrice), FH: flatPoint(localSnapshot.navPrice), FY: flatPoint(localSnapshot.navPrice) }
+                    : { D: [], FQ: [], FH: [], FY: [] },
+            TOTAL_ASSETS: {
+                D: localSnapshot.kind === 'fund' ? flatPoint(localSnapshot.totalAssets) : [],
+                FQ: flatPoint(localSnapshot.totalAssets),
+                FH: flatPoint(localSnapshot.totalAssets),
+                FY: flatPoint(localSnapshot.totalAssets),
+            },
+            TOTAL_EQUITY: {
+                D: localSnapshot.kind === 'fund' ? flatPoint(localSnapshot.totalEquity) : [],
+                FQ: flatPoint(localSnapshot.totalEquity),
+                FH: flatPoint(localSnapshot.totalEquity),
+                FY: flatPoint(localSnapshot.totalEquity),
+            },
+            RETURN_ON_ASSETS: {
+                D: [],
+                FQ: flatPoint(localSnapshot.returnOnAssets),
+                FH: flatPoint(localSnapshot.returnOnAssets),
+                FY: flatPoint(localSnapshot.returnOnAssets),
+            },
+            RETURN_ON_EQUITY: {
+                D: [],
+                FQ: flatPoint(localSnapshot.returnOnEquity),
+                FH: flatPoint(localSnapshot.returnOnEquity),
+                FY: flatPoint(localSnapshot.returnOnEquity),
+            },
+            RETURN_ON_TANG_EQUITY: { D: [], FQ: [], FH: [], FY: [] },
+        };
+        await writeYahooCache(baseDir, 'yahoo_financials_cache', symbol, catalog, YAHOO_PAGE_TTL_MS, YAHOO_FINANCIAL_CACHE_VERSION);
         return {
-            AUM: cached.AUM,
-            NAV: cached.NAV,
-            NAV_ALL: cached.NAV_ALL,
-            TOTAL_ASSETS: cached.TOTAL_ASSETS,
-            TOTAL_EQUITY: cached.TOTAL_EQUITY,
-            RETURN_ON_ASSETS: cached.RETURN_ON_ASSETS,
-            RETURN_ON_EQUITY: cached.RETURN_ON_EQUITY,
-            RETURN_ON_TANG_EQUITY: cached.RETURN_ON_TANG_EQUITY,
+            AUM: catalog.AUM,
+            NAV: catalog.NAV,
+            NAV_ALL: catalog.NAV_ALL,
+            TOTAL_ASSETS: catalog.TOTAL_ASSETS,
+            TOTAL_EQUITY: catalog.TOTAL_EQUITY,
+            RETURN_ON_ASSETS: catalog.RETURN_ON_ASSETS,
+            RETURN_ON_EQUITY: catalog.RETURN_ON_EQUITY,
+            RETURN_ON_TANG_EQUITY: catalog.RETURN_ON_TANG_EQUITY,
+        };
+    }
+
+    const cached = await readYahooCache<YahooFinancialCatalogCache>(baseDir, 'yahoo_financials_cache', symbol);
+    if (cached?.cacheVersion === YAHOO_FINANCIAL_CACHE_VERSION) {
+        const payload = cached.payload;
+        return {
+            AUM: payload.AUM,
+            NAV: payload.NAV,
+            NAV_ALL: payload.NAV_ALL,
+            TOTAL_ASSETS: payload.TOTAL_ASSETS,
+            TOTAL_EQUITY: payload.TOTAL_EQUITY,
+            RETURN_ON_ASSETS: payload.RETURN_ON_ASSETS,
+            RETURN_ON_EQUITY: payload.RETURN_ON_EQUITY,
+            RETURN_ON_TANG_EQUITY: payload.RETURN_ON_TANG_EQUITY,
         };
     }
 
@@ -412,7 +454,7 @@ export async function fetchYahooFinancialCatalog(baseDir: string, symbolInput: s
             RETURN_ON_EQUITY: { D: [], FQ: [], FH: [], FY: [] },
             RETURN_ON_TANG_EQUITY: { D: [], FQ: [], FH: [], FY: [] },
         };
-        await writeCache(cachePath, catalog);
+        await writeYahooCache(baseDir, 'yahoo_financials_cache', symbol, catalog, YAHOO_PAGE_TTL_MS, YAHOO_FINANCIAL_CACHE_VERSION);
         return {
             AUM: catalog.AUM,
             NAV: catalog.NAV,
@@ -526,7 +568,7 @@ export async function fetchYahooFinancialCatalog(baseDir: string, symbolInput: s
         },
     };
 
-    await writeCache(cachePath, catalog);
+    await writeYahooCache(baseDir, 'yahoo_financials_cache', symbol, catalog, YAHOO_PAGE_TTL_MS, YAHOO_FINANCIAL_CACHE_VERSION);
     return {
         AUM: catalog.AUM,
         NAV: catalog.NAV,

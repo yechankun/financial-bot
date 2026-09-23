@@ -152,6 +152,10 @@ export function createChatCommandHandler({
 
       ensureCommandCapability(interaction.commandName);
 
+      if (interaction.commandName === "report") {
+        await interaction.deferReply();
+      }
+
       if (shouldConsumeRateLimit(interaction.commandName)) {
         await enforceRateLimit(interaction);
       }

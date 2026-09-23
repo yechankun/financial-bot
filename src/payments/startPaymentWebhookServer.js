@@ -1,5 +1,7 @@
 import http from "node:http";
 import fs from "node:fs/promises";
+import path from "node:path";
+import { timingSafeEqual } from "node:crypto";
 
 import { config } from "../config.js";
 import { ingestPaymentEvent } from "../gateways/internal/appGateway.js";
@@ -29,21 +31,19 @@ function parseRequestBody(contentType, rawBody) {
   return { raw: bodyText };
 }
 
-function hasValidSecret({ requestUrl, headers, payload }) {
-  if (!config.gumroadPingSecret) {
-    return true;
-  }
+function hasValidSecret({ requestUrl, headers, payload, settings }) {
+  if (!settings.gumroadPingSecret) return false;
 
   const querySecret = requestUrl.searchParams.get("secret") || "";
   const headerSecret = headers["x-gumroad-secret"] || headers["x-webhook-secret"] || "";
   const payloadSecret =
     (payload && typeof payload === "object" && (payload.secret || payload.token)) || "";
 
-  return (
-    String(querySecret) === config.gumroadPingSecret ||
-    String(headerSecret) === config.gumroadPingSecret ||
-    String(payloadSecret) === config.gumroadPingSecret
-  );
+  const expected = Buffer.from(settings.gumroadPingSecret);
+  return [querySecret, headerSecret, payloadSecret].some((value) => {
+    const supplied = Buffer.from(String(value));
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  });
 }
 
 function writeJson(response, statusCode, body) {
@@ -53,8 +53,8 @@ function writeJson(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
-async function appendRawPingLog({ request, requestUrl, rawBody, payload, normalized, result, error }) {
-  if (!config.gumroadPingRawLogPath) {
+async function appendRawPingLog({ request, requestUrl, payload, normalized, result, error, settings }) {
+  if (!settings.gumroadPingRawLogPath) {
     return;
   }
 
@@ -62,34 +62,34 @@ async function appendRawPingLog({ request, requestUrl, rawBody, payload, normali
     receivedAt: new Date().toISOString(),
     method: request.method || "",
     path: requestUrl.pathname,
-    query: Object.fromEntries(requestUrl.searchParams.entries()),
-    headers: request.headers,
-    rawBody: rawBody.toString("utf8"),
+    query: { resource_name: requestUrl.searchParams.get("resource_name") || "" },
+    headers: { "content-type": request.headers["content-type"] },
     payload,
     normalized,
     result,
     error: error ? (error instanceof Error ? error.message : String(error)) : "",
   };
 
+  const serialized = JSON.stringify(entry, (key, value) => {
+    if (/secret|token|authorization|license.?key/i.test(key)) return "[redacted]";
+    return typeof value === "string" && settings.gumroadPingSecret
+      ? value.replaceAll(settings.gumroadPingSecret, "[redacted]") : value;
+  });
+  await fs.mkdir(path.dirname(settings.gumroadPingRawLogPath), { recursive: true });
   await fs.appendFile(
-    config.gumroadPingRawLogPath,
-    `${JSON.stringify(entry, null, 2)}\n`,
+    settings.gumroadPingRawLogPath,
+    `${serialized}\n`,
     "utf8",
   );
 }
 
-export async function startPaymentWebhookServer() {
-  if (!config.gumroadPingEnabled) {
-    return null;
-  }
+export function createPaymentWebhookHandler({ settings = config, ingest = ingestPaymentEvent } = {}) {
+  return async (request, response) => {
+    let requestUrl;
+    try { requestUrl = new URL(request.url || "/", "http://localhost"); }
+    catch { writeJson(response, 400, { ok: false, error: "invalid_url" }); return; }
 
-  const server = http.createServer(async (request, response) => {
-    const requestUrl = new URL(
-      request.url || "/",
-      `http://${request.headers.host || "localhost"}`,
-    );
-
-    if (requestUrl.pathname !== config.gumroadPingPath) {
+    if (requestUrl.pathname !== settings.gumroadPingPath) {
       writeJson(response, 404, { ok: false, error: "not_found" });
       return;
     }
@@ -98,7 +98,7 @@ export async function startPaymentWebhookServer() {
       writeJson(response, 200, {
         ok: true,
         provider: "gumroad",
-        path: config.gumroadPingPath,
+        path: settings.gumroadPingPath,
       });
       return;
     }
@@ -113,13 +113,20 @@ export async function startPaymentWebhookServer() {
 
     try {
       const chunks = [];
+      let byteLength = 0;
       for await (const chunk of request) {
+        byteLength += Buffer.byteLength(chunk);
+        if (byteLength > settings.gumroadPingMaxBodyBytes) {
+          writeJson(response, 413, { ok: false, error: "payload_too_large" });
+          return;
+        }
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
       rawBody = Buffer.concat(chunks);
-      payload = parseRequestBody(request.headers["content-type"], rawBody);
+      try { payload = parseRequestBody(request.headers["content-type"], rawBody); }
+      catch { writeJson(response, 400, { ok: false, error: "invalid_body" }); return; }
 
-      if (!hasValidSecret({ requestUrl, headers: request.headers, payload })) {
+      if (!hasValidSecret({ requestUrl, headers: request.headers, payload, settings })) {
         writeJson(response, 403, { ok: false, error: "invalid_secret" });
         return;
       }
@@ -127,7 +134,7 @@ export async function startPaymentWebhookServer() {
       const normalized = normalizeGumroadWebhookPayload(payload, {
         resourceName: requestUrl.searchParams.get("resource_name") || "",
       });
-      const result = await ingestPaymentEvent(normalized);
+      const result = await ingest(normalized);
       await appendRawPingLog({
         request,
         requestUrl,
@@ -135,7 +142,8 @@ export async function startPaymentWebhookServer() {
         payload,
         normalized,
         result,
-      });
+        settings,
+      }).catch((error) => console.error("Payment event log failed:", error));
       writeJson(response, 200, {
         ok: true,
         paymentEvent: result.payment_event,
@@ -149,13 +157,22 @@ export async function startPaymentWebhookServer() {
         normalized: null,
         result: null,
         error,
+        settings,
       }).catch(() => {});
       writeJson(response, 500, {
         ok: false,
-        error: error instanceof Error ? error.message : "gumroad_ping_failed",
+        error: "gumroad_ping_failed",
       });
     }
-  });
+  };
+}
+
+export async function startPaymentWebhookServer() {
+  if (!config.gumroadPingEnabled) return null;
+  if (!config.gumroadPingSecret) {
+    throw new Error("GUMROAD_PING_SECRET is required when the payment webhook is enabled.");
+  }
+  const server = http.createServer({ requestTimeout: 30_000, headersTimeout: 10_000 }, createPaymentWebhookHandler());
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);

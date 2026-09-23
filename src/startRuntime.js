@@ -1,251 +1,131 @@
 import { startDiscordBot } from "./discordBot.js";
 import { config } from "./config.js";
-import {
-  createBenchmarkQueueConsumer,
-  drainPendingBenchmarkQueue,
-  ensureBenchmarkRuntime,
-} from "./gateways/internal/benchmarkGateway.js";
-import {
-  createChartQueueConsumer,
-  drainPendingChartQueue,
-  ensureChartRuntime,
-} from "./gateways/internal/chartGateway.js";
-import {
-  getCollectorStatus,
-  runCollectorTick,
-} from "./gateways/internal/collectorGateway.js";
-import {
-  getInternalProviderStatus,
-  hasInternalProvider,
-} from "./gateways/internal/provider.js";
-import {
-  getCapabilityStatus,
-  hasCapability,
-  shouldStartDiscordIngress,
-} from "./runtimeCapabilities.js";
+import { startAutoReportScheduler } from "./usecases/autoReportScheduler.js";
+import { createBenchmarkQueueConsumer, drainPendingBenchmarkQueue, ensureBenchmarkRuntime } from "./gateways/internal/benchmarkGateway.js";
+import { createChartQueueConsumer, drainPendingChartQueue, ensureChartRuntime } from "./gateways/internal/chartGateway.js";
+import { getCollectorStatus, runCollectorTick } from "./gateways/internal/collectorGateway.js";
+import { getInternalProviderStatus, hasInternalProvider } from "./gateways/internal/provider.js";
+import { getCapabilityStatus, hasCapability, shouldStartDiscordIngress } from "./runtimeCapabilities.js";
 import { startPaymentWebhookServer } from "./payments/startPaymentWebhookServer.js";
 import { startLocalhostRunTunnel } from "./payments/startLocalhostRunTunnel.js";
 import { syncGumroadResourceSubscriptions } from "./payments/gumroadResourceSubscriptions.js";
-import {
-  drainReportJobQueue,
-  ensureReportJobQueueDirs,
-} from "./reportJobQueue.js";
+import { createReportDeliveryConsumer, drainReportJobQueue, ensureReportJobQueueDirs } from "./reportJobQueue.js";
 import { createReportJobConsumer } from "./usecases/processReportJobs.js";
+import { createReportJobProgressDeliverer, createReportJobResultDeliverer } from "./usecases/reportJobNotifier.js";
 
-function logCapabilityStatus() {
-  const status = getCapabilityStatus();
-  console.log(
-    `Runtime capabilities: ${status.capabilities.join(", ") || "(none)"}`,
-  );
-}
-
-function createParentWatchdog() {
-  const parentPid = Number(process.env.BOT_RUNTIME_PARENT_PID || 0);
-  if (!Number.isInteger(parentPid) || parentPid <= 1) {
-    return () => {};
-  }
-
-  const intervalMs = Math.max(
-    1000,
-    Number(process.env.BOT_RUNTIME_PARENT_WATCHDOG_INTERVAL_MS || 2000),
-  );
-  let triggered = false;
-  const timer = setInterval(() => {
-    if (triggered) {
-      return;
-    }
-    if (process.ppid === 1) {
-      triggered = true;
-      console.warn(`Runtime parent missing. shutting down. parentPid=${parentPid}`);
-      process.kill(process.pid, "SIGTERM");
-      return;
-    }
-    try {
-      process.kill(parentPid, 0);
-    } catch {
-      triggered = true;
-      console.warn(`Runtime parent unreachable. shutting down. parentPid=${parentPid}`);
-      process.kill(process.pid, "SIGTERM");
-    }
-  }, intervalMs);
-  timer.unref?.();
-
-  return () => {
+export function startPollingTask(task, intervalMs, onError = console.error) {
+  let current = null;
+  let stopped = false;
+  const tick = () => {
+    if (stopped || current) return;
+    current = Promise.resolve().then(task).catch(onError).finally(() => { current = null; });
+  };
+  const timer = setInterval(tick, intervalMs);
+  tick();
+  return async () => {
+    stopped = true;
     clearInterval(timer);
+    await current;
   };
 }
 
 export async function startRuntime() {
-  logCapabilityStatus();
-
-  const paymentWebhookEnabled = hasCapability("payment-webhook");
-  let paymentServer = null;
-  let paymentTunnel = null;
-  const shutdownActions = [createParentWatchdog()];
-  if (paymentWebhookEnabled) {
-    paymentServer = await startPaymentWebhookServer();
-    shutdownActions.push(async () => {
-      await new Promise((resolve) => {
-        paymentServer.close(() => resolve());
-      });
-    });
-    if (config.gumroadPublicBaseUrl) {
-      console.log(
-        `Payment webhook public URL: ${config.gumroadPublicBaseUrl}${config.gumroadPingPath}`,
-      );
-    } else {
-      try {
-        paymentTunnel = await startLocalhostRunTunnel();
-        if (paymentTunnel) {
-          shutdownActions.push(async () => {
-            paymentTunnel.stop();
-          });
-        }
-      } catch (error) {
-        console.error("Payment webhook tunnel start failed:", error);
-      }
-    }
-
-    if (config.gumroadResourceSubscriptionsEnabled) {
-      try {
-        const syncResult = await syncGumroadResourceSubscriptions();
-        for (const item of syncResult.removed || []) {
-          console.log(
-            `Removed Gumroad resource subscription: ${item.resourceName} -> ${item.postUrl}`,
-          );
-        }
-        for (const item of syncResult.synced || []) {
-          console.log(
-            `Gumroad resource subscription ${item.mode}: ${item.resourceName} -> ${item.postUrl}`,
-          );
-        }
-      } catch (error) {
-        console.error("Gumroad resource subscription sync failed:", error);
-      }
-    }
+  const status = getCapabilityStatus();
+  console.log(`Runtime capabilities: ${status.capabilities.join(", ") || "(none)"}`);
+  const provider = getInternalProviderStatus();
+  if (!provider.available && provider.requestedMode === "package") {
+    throw new Error(`Internal provider failed to load: ${provider.error}`);
   }
+  if (provider.missingApi.length > 0) {
+    throw new Error(`Internal provider ${provider.packageSpecifier} is missing ${provider.missingApi.join(", ")}. `
+      + "Update the pinned financial-bot-internal version or point INTERNAL_PROVIDER_PACKAGE at a matching checkout.");
+  }
+  const internalAvailable = hasInternalProvider();
+  const shutdownActions = [];
+  const controller = new AbortController();
+  let resolveShutdown;
+  const shuttingDown = new Promise((resolve) => { resolveShutdown = resolve; });
+  const shutdown = () => { controller.abort(); resolveShutdown(); };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  try {
+    const parentPid = Number(process.env.BOT_RUNTIME_PARENT_PID || 0);
+    if (parentPid > 1) {
+      const watchdog = setInterval(() => {
+        try { process.kill(parentPid, 0); } catch { shutdown(); }
+      }, 2000);
+      watchdog.unref();
+      shutdownActions.push(() => clearInterval(watchdog));
+    }
 
-  const runShutdownActions = async () => {
+    let paymentServer = null;
+    if (hasCapability("payment-webhook") && config.gumroadPingEnabled) {
+      if (!internalAvailable) throw new Error("Payment webhooks require the internal provider.");
+      paymentServer = await startPaymentWebhookServer();
+      shutdownActions.push(() => new Promise((resolve) => {
+        paymentServer.close(resolve);
+        paymentServer.closeIdleConnections();
+      }));
+      if (!config.gumroadPublicBaseUrl) {
+        const tunnel = await startLocalhostRunTunnel();
+        if (tunnel) shutdownActions.push(() => tunnel.stop());
+      }
+      if (config.gumroadResourceSubscriptionsEnabled) {
+        await syncGumroadResourceSubscriptions();
+      }
+    }
+
+    // Delivery starts only after Discord has connected. Workers never need a Discord login.
+    const client = shouldStartDiscordIngress() ? await startDiscordBot() : null;
+    if (client) shutdownActions.push(() => client.destroy());
+    const intervalMs = Number(process.env.BACKGROUND_POLL_INTERVAL_MS || 5000);
+    if (!Number.isFinite(intervalMs) || intervalMs < 100) {
+      throw new Error("BACKGROUND_POLL_INTERVAL_MS must be at least 100.");
+    }
+    const poll = (name, task) => shutdownActions.push(startPollingTask(task, intervalMs,
+      (error) => console.error(`${name} failed:`, error)));
+
+    if (internalAvailable) {
+      if (client || hasCapability("report-worker")) await ensureReportJobQueueDirs();
+      if (client) {
+        poll("Report delivery", createReportDeliveryConsumer({
+          deliverProgress: createReportJobProgressDeliverer({ client }),
+          deliverResult: createReportJobResultDeliverer({ client }),
+        }));
+        if (config.autoReportEnabled) shutdownActions.push(startAutoReportScheduler({ client }));
+      }
+      if (hasCapability("report-worker")) {
+        const consume = createReportJobConsumer({ signal: controller.signal });
+        poll("Report worker", () => drainReportJobQueue(consume));
+        await ensureChartRuntime();
+        const consumeCharts = createChartQueueConsumer();
+        poll("Chart worker", () => drainPendingChartQueue(consumeCharts));
+      }
+      if (hasCapability("ai-trading") || hasCapability("report-worker")) {
+        await ensureBenchmarkRuntime();
+        const consumeBenchmark = createBenchmarkQueueConsumer(client);
+        poll("Benchmark worker", () => drainPendingBenchmarkQueue(consumeBenchmark));
+      }
+      if (hasCapability("collector")) {
+        const collector = getCollectorStatus();
+        console.log(`Collector tasks: ${collector.tasks.join(", ")}`);
+        let firstTick = true;
+        poll("Collector", async () => {
+          const force = firstTick && collector.runOnStart;
+          firstTick = false;
+          await runCollectorTick({ force });
+        });
+      }
+    }
+    if (client || paymentServer || (internalAvailable && status.runsBackgroundRuntime)) {
+      await shuttingDown;
+    }
+  } finally {
+    controller.abort();
+    process.off("SIGINT", shutdown);
+    process.off("SIGTERM", shutdown);
     for (const action of shutdownActions.reverse()) {
-      try {
-        await action();
-      } catch (error) {
-        console.error("Shutdown cleanup failed:", error);
-      }
+      try { await action(); } catch (error) { console.error("Shutdown cleanup failed:", error); }
     }
-  };
-
-  const installSimpleShutdownHooks = () => {
-    const shutdown = () => {
-      void runShutdownActions().finally(() => process.exit(0));
-    };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-  };
-
-  if (shouldStartDiscordIngress()) {
-    await startDiscordBot();
   }
-
-  const providerStatus = getInternalProviderStatus();
-  if (!hasInternalProvider()) {
-    if (shouldStartDiscordIngress() || paymentServer) {
-      if (paymentServer && !shouldStartDiscordIngress()) {
-        installSimpleShutdownHooks();
-      }
-      return;
-    }
-    console.warn(
-      `Internal provider unavailable for background runtime. requested=${providerStatus.requestedMode} resolved=${providerStatus.resolvedMode} error=${providerStatus.error || "none"}`,
-    );
-    return;
-  }
-
-  const chartWorkerEnabled = hasCapability("report-worker");
-  const reportWorkerEnabled = hasCapability("report-worker");
-  const benchmarkWorkerEnabled =
-    hasCapability("ai-trading") || hasCapability("report-worker");
-  const collectorEnabled = hasCapability("collector");
-
-  if (!chartWorkerEnabled && !reportWorkerEnabled && !benchmarkWorkerEnabled && !collectorEnabled) {
-    if (shouldStartDiscordIngress() || paymentServer) {
-      if (paymentServer && !shouldStartDiscordIngress()) {
-        installSimpleShutdownHooks();
-      }
-      return;
-    }
-    console.log("No background capabilities enabled. Exiting runtime.");
-    return;
-  }
-
-  if (reportWorkerEnabled) {
-    await ensureReportJobQueueDirs();
-  }
-  if (chartWorkerEnabled) {
-    await ensureChartRuntime();
-  }
-  if (benchmarkWorkerEnabled) {
-    await ensureBenchmarkRuntime();
-  }
-
-  if (collectorEnabled) {
-    const collectorStatus = getCollectorStatus();
-    console.log(
-      `collector capability enabled. tasks=${collectorStatus.tasks.join(", ") || "(none)"} intervalMs=${collectorStatus.intervalMs}`,
-    );
-  }
-
-  const consumeChartQueueBatch = chartWorkerEnabled
-    ? createChartQueueConsumer()
-    : async () => {};
-  const consumeBenchmarkQueueBatch = benchmarkWorkerEnabled
-    ? createBenchmarkQueueConsumer()
-    : async () => {};
-  const consumeReportJobBatch = reportWorkerEnabled
-    ? createReportJobConsumer({
-        consumeChartQueueBatch,
-        consumeBenchmarkQueueBatch,
-      })
-    : async () => {};
-
-  const drainQueues = async () => {
-    if (reportWorkerEnabled) {
-      await drainReportJobQueue(consumeReportJobBatch);
-    }
-    if (chartWorkerEnabled) {
-      await drainPendingChartQueue(consumeChartQueueBatch);
-    }
-    if (benchmarkWorkerEnabled) {
-      await drainPendingBenchmarkQueue(consumeBenchmarkQueueBatch);
-    }
-    if (collectorEnabled) {
-      await runCollectorTick();
-    }
-  };
-
-  if (collectorEnabled && getCollectorStatus().runOnStart) {
-    await runCollectorTick({ force: true });
-  }
-  await drainQueues();
-
-  const pollIntervalMs = Number(process.env.BACKGROUND_POLL_INTERVAL_MS || 5000);
-  const timer = setInterval(() => {
-    void drainQueues().catch((error) => {
-      console.error("Background runtime queue drain failed:", error);
-    });
-  }, pollIntervalMs);
-
-  console.log(
-    `Background runtime started with poll interval ${pollIntervalMs}ms.`,
-  );
-
-  await new Promise((resolve) => {
-    const shutdown = () => {
-      clearInterval(timer);
-      void runShutdownActions().finally(() => resolve());
-    };
-
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-  });
 }

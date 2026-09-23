@@ -1,0 +1,237 @@
+//@version=6
+indicator("ΔΔ Cycle Reversal Scanner", overlay=true)
+
+grpSrc = "Source"
+baseSrc = input.source(close, "Price Source", group=grpSrc)
+srcMode = input.string("RAW", "Source Mode", options=["RAW", "HLC3", "OHLC4", "SMA", "EMA"], group=grpSrc)
+maLen = input.int(20, "MA Length", minval=1, group=grpSrc)
+
+grpPrice = "Price BB%b"
+priceLen1 = input.int(20, "Length 1", minval=2, group=grpPrice)
+priceLen2 = input.int(55, "Length 2", minval=2, group=grpPrice)
+priceLen3 = input.int(144, "Length 3", minval=2, group=grpPrice)
+priceMult = input.float(2.0, "StdDev", minval=0.1, step=0.1, group=grpPrice)
+
+grpReturn = "Return BB%b"
+retPeriod1 = input.int(20, "Return Period 1", minval=1, group=grpReturn)
+retPeriod2 = input.int(70, "Return Period 2", minval=1, group=grpReturn)
+retPeriod3 = input.int(140, "Return Period 3", minval=1, group=grpReturn)
+retBbLen = input.int(520, "Return BB Length", minval=20, group=grpReturn)
+retBbMult = input.float(2.0, "Return StdDev", minval=0.1, step=0.1, group=grpReturn)
+
+grpEngine = "Engine"
+smoothLen = input.int(5, "Composite Smooth", minval=1, group=grpEngine)
+d1Smooth = input.int(3, "Δ Smooth", minval=1, group=grpEngine)
+rankLen = input.int(120, "Strength Lookback", minval=20, group=grpEngine)
+priceWeight = input.float(0.35, "Price Weight", minval=0.0, maxval=1.0, step=0.05, group=grpEngine)
+returnWeight = input.float(0.65, "Return Weight", minval=0.0, maxval=1.0, step=0.05, group=grpEngine)
+trendLen = input.int(34, "Trend EMA", minval=2, group=grpEngine)
+
+grpShort = "Short Pressure"
+shortRollLen = input.int(10, "Rolling Length", minval=1, group=grpShort)
+shortNormLen = input.int(120, "Normalization Length", minval=20, group=grpShort)
+shortZCap = input.float(2.5, "Short Z Cap", minval=0.5, maxval=6.0, step=0.1, group=grpShort)
+shortUpperPct = input.float(90.0, "Extreme Upper Percentile", minval=50.0, maxval=99.0, step=1.0, group=grpShort)
+shortLowerPct = input.float(10.0, "Extreme Lower Percentile", minval=1.0, maxval=50.0, step=1.0, group=grpShort)
+
+grpSignal = "Signal"
+setupThreshold = input.float(0.55, "Arm Threshold", minval=0.1, maxval=3.0, step=0.05, group=grpSignal)
+extremeThreshold = input.float(1.25, "Extreme Threshold", minval=0.2, maxval=4.0, step=0.05, group=grpSignal)
+swingPercentile = input.float(18.0, "Swing Percentile", minval=1.0, maxval=40.0, step=1.0, group=grpSignal)
+minStrength = input.float(0.1, "Min Strength", minval=0.0, maxval=1.0, step=0.05, group=grpSignal)
+pivotBars = input.int(1, "Pivot Confirm Bars", minval=1, maxval=3, group=grpSignal)
+divLookback = input.int(20, "Divergence Lookback", minval=5, maxval=80, group=grpSignal)
+
+grpDisp = "Display"
+showBg = input.bool(true, "Background", group=grpDisp)
+showTrend = input.bool(true, "Show Trend EMA", group=grpDisp)
+showBands = input.bool(false, "Show Price Bollinger Basis", group=grpDisp)
+showEarly = input.bool(false, "Show Early Setup Dots", group=grpDisp)
+
+src = switch srcMode
+    "RAW" => baseSrc
+    "HLC3" => hlc3
+    "OHLC4" => ohlc4
+    "SMA" => ta.sma(baseSrc, maLen)
+    "EMA" => ta.ema(baseSrc, maLen)
+
+priceBasis1 = ta.sma(src, priceLen1)
+priceDev1 = ta.stdev(src, priceLen1)
+priceZ1 = priceDev1 != 0 ? (src - priceBasis1) / priceDev1 : na
+priceScore1 = na(priceZ1) ? 0.0 : math.max(math.min(priceZ1 / priceMult, 3.0), -3.0)
+priceCount1 = na(priceZ1) ? 0.0 : 1.0
+
+priceBasis2 = ta.sma(src, priceLen2)
+priceDev2 = ta.stdev(src, priceLen2)
+priceZ2 = priceDev2 != 0 ? (src - priceBasis2) / priceDev2 : na
+priceScore2 = na(priceZ2) ? 0.0 : math.max(math.min(priceZ2 / priceMult, 3.0), -3.0)
+priceCount2 = na(priceZ2) ? 0.0 : 1.0
+
+priceBasis3 = ta.sma(src, priceLen3)
+priceDev3 = ta.stdev(src, priceLen3)
+priceZ3 = priceDev3 != 0 ? (src - priceBasis3) / priceDev3 : na
+priceScore3 = na(priceZ3) ? 0.0 : math.max(math.min(priceZ3 / priceMult, 3.0), -3.0)
+priceCount3 = na(priceZ3) ? 0.0 : 1.0
+
+priceCycle = (priceScore1 + priceScore2 + priceScore3) / math.max(priceCount1 + priceCount2 + priceCount3, 1.0)
+
+ret1 = (close - close[retPeriod1]) / close[retPeriod1] * 100.0
+retBasis1 = ta.sma(ret1, retBbLen)
+retDev1 = ta.stdev(ret1, retBbLen)
+retZ1 = retDev1 != 0 ? (ret1 - retBasis1) / retDev1 : na
+retScore1 = na(retZ1) ? 0.0 : math.max(math.min(retZ1 / retBbMult, 3.0), -3.0)
+retCount1 = na(retZ1) ? 0.0 : 1.0
+
+ret2 = (close - close[retPeriod2]) / close[retPeriod2] * 100.0
+retBasis2 = ta.sma(ret2, retBbLen)
+retDev2 = ta.stdev(ret2, retBbLen)
+retZ2 = retDev2 != 0 ? (ret2 - retBasis2) / retDev2 : na
+retScore2 = na(retZ2) ? 0.0 : math.max(math.min(retZ2 / retBbMult, 3.0), -3.0)
+retCount2 = na(retZ2) ? 0.0 : 1.0
+
+ret3 = (close - close[retPeriod3]) / close[retPeriod3] * 100.0
+retBasis3 = ta.sma(ret3, retBbLen)
+retDev3 = ta.stdev(ret3, retBbLen)
+retZ3 = retDev3 != 0 ? (ret3 - retBasis3) / retDev3 : na
+retScore3 = na(retZ3) ? 0.0 : math.max(math.min(retZ3 / retBbMult, 3.0), -3.0)
+retCount3 = na(retZ3) ? 0.0 : 1.0
+
+returnCycle = (retScore1 + retScore2 + retScore3) / math.max(retCount1 + retCount2 + retCount3, 1.0)
+
+shortTicker = "FINRA:" + syminfo.ticker + "_SHORT_VOLUME"
+shortVol = request.security(shortTicker, timeframe.period, close, barmerge.gaps_on)
+isFund = syminfo.type == "fund"
+financialId = isFund ? "AUM" : "TOTAL_SHARES_OUTSTANDING"
+financialValue = request.financial(syminfo.tickerid, financialId, isFund ? "D" : "FQ")
+denom = isFund ? financialValue : not na(financialValue) and not na(close) ? financialValue * close : na
+shortValueMcap = not na(shortVol) and not na(denom) and denom != 0 ? (shortVol * close) / denom : na
+shortPressure = ta.sma(shortValueMcap, shortRollLen)
+shortBasis = ta.sma(shortPressure, shortNormLen)
+shortDev = ta.stdev(shortPressure, shortNormLen)
+shortZ = shortDev != 0 ? (shortPressure - shortBasis) / shortDev : na
+shortCycle = na(shortZ) ? 0.0 : math.max(math.min(shortZ / shortZCap, 3.0), -3.0)
+shortPct = ta.percentrank(shortPressure, shortNormLen)
+shortExtreme = not na(shortPct) and (shortPct >= shortUpperPct or shortPct <= shortLowerPct)
+
+weightDenom = math.max(priceWeight + returnWeight, 0.0001)
+rawComposite = (priceCycle * priceWeight + returnCycle * returnWeight) / weightDenom
+composite = ta.ema(rawComposite, smoothLen)
+trend = ta.ema(close, trendLen)
+d1Raw = composite - composite[1]
+d1 = ta.ema(d1Raw, d1Smooth)
+d2 = d1 - d1[1]
+
+alignedUp = priceCycle > setupThreshold and returnCycle > setupThreshold
+alignedDown = priceCycle < -setupThreshold and returnCycle < -setupThreshold
+compositeBasis = ta.sma(composite, rankLen)
+compositeDev = ta.stdev(composite, rankLen)
+phaseZ = compositeDev != 0 ? (composite - compositeBasis) / compositeDev : 0.0
+phasePct = ta.percentrank(phaseZ, rankLen)
+extremeUp = phaseZ > extremeThreshold
+extremeDown = phaseZ < -extremeThreshold
+
+strengthPct = ta.percentrank(math.abs(phaseZ), rankLen)
+strength = math.max((strengthPct - 50.0) / 50.0, 0.0)
+deltaConfirmed = (composite >= 0 and d1 > 0) or (composite < 0 and d1 < 0)
+phase = deltaConfirmed ? 1.0 : (extremeUp or extremeDown) ? 0.85 : 0.55
+
+turnDown = d1 < 0 and d1[1] >= 0
+turnUp = d1 > 0 and d1[1] <= 0
+phasePeak = pivotBars == 1 ? (phaseZ[1] > phaseZ and phaseZ[1] >= phaseZ[2]) : (phaseZ[1] == ta.highest(phaseZ, pivotBars * 2 + 1)[1] and phaseZ[1] > phaseZ)
+phaseTrough = pivotBars == 1 ? (phaseZ[1] < phaseZ and phaseZ[1] <= phaseZ[2]) : (phaseZ[1] == ta.lowest(phaseZ, pivotBars * 2 + 1)[1] and phaseZ[1] < phaseZ)
+decelDown = d2 < 0 and d2[1] >= 0 and d1 > 0
+decelUp = d2 > 0 and d2[1] <= 0 and d1 < 0
+priorHigh = ta.highest(high[1], divLookback)
+priorLow = ta.lowest(low[1], divLookback)
+priorPhaseHigh = ta.highest(phaseZ[1], divLookback)
+priorPhaseLow = ta.lowest(phaseZ[1], divLookback)
+bearDivergence = high >= priorHigh and phaseZ < priorPhaseHigh
+bullDivergence = low <= priorLow and phaseZ > priorPhaseLow
+softBearPeak = phaseZ[1] > phaseZ[2] and phaseZ <= phaseZ[1]
+softBullTrough = phaseZ[1] < phaseZ[2] and phaseZ >= phaseZ[1]
+
+biasBalance = math.abs(priceCycle - returnCycle)
+upperPct = 100.0 - swingPercentile
+lowerPct = swingPercentile
+topArm = shortExtreme and phaseZ > 0 and phasePct >= upperPct and strength >= minStrength and biasBalance <= extremeThreshold * 2.0
+botArm = shortExtreme and phaseZ < 0 and phasePct <= lowerPct and strength >= minStrength and biasBalance <= extremeThreshold * 2.0
+
+var bool topArmed = false
+var bool botArmed = false
+
+if phasePct < 50 or phaseZ < 0
+    topArmed := false
+if phasePct > 50 or phaseZ > 0
+    botArmed := false
+
+if topArm
+    topArmed := true
+if botArm
+    botArmed := true
+
+bearTurn = topArmed and decelDown and (bearDivergence or softBearPeak or phasePeak) and barstate.isconfirmed
+bullTurn = botArmed and decelUp and (bullDivergence or softBullTrough or phaseTrough) and barstate.isconfirmed
+
+if bearTurn
+    topArmed := false
+if bullTurn
+    botArmed := false
+
+earlyBearDot = showEarly and phaseZ > 0 and phasePct >= upperPct and decelDown and not bearTurn
+earlyBullDot = showEarly and phaseZ < 0 and phasePct <= lowerPct and decelUp and not bullTurn
+
+signalScore =
+    bullTurn ? strength :
+    bearTurn ? -strength :
+    0.0
+
+priceBasisOverlay = ta.sma(src, priceLen2)
+
+plot(showTrend ? trend : na, "Trend EMA", color=color.new(#90CAF9, 0), linewidth=2)
+plot(showBands ? priceBasisOverlay : na, "Price Basis", color=color.new(#FFD54F, 10), linewidth=1)
+
+bgAlpha = math.abs(signalScore) > 0.4 ? 91 : 96
+bgCol =
+    extremeUp ? color.new(#FF1744, 92) :
+    extremeDown ? color.new(#00C853, 92) :
+    na
+bgcolor(showBg ? bgCol : na)
+
+plotshape(earlyBearDot, "Early Top Setup", shape.circle, location.abovebar, color.new(#FF8A80, 10), size=size.tiny, text="")
+plotshape(earlyBullDot, "Early Bottom Setup", shape.circle, location.belowbar, color.new(#69F0AE, 10), size=size.tiny, text="")
+plotshape(bearTurn, "Top Turn", shape.labeldown, location.abovebar, color.new(#FF1744, 0), size=size.small, text="TOP")
+plotshape(bullTurn, "Bottom Turn", shape.labelup, location.belowbar, color.new(#00E676, 0), size=size.small, text="BOT")
+
+var table panel = table.new(position.top_right, 4, 1, bgcolor=color.new(#0a0a14, 5), border_width=0)
+cellBg = color.new(#111122, 0)
+dimTxt = color.new(#666688, 0)
+
+if barstate.islast
+    table.cell(panel, 0, 0, timeframe.period, text_color=dimTxt, bgcolor=cellBg, text_size=size.small)
+
+    dirTxt = signalScore >= 0 ? "▲" : "▼"
+    pctTxt = str.tostring(math.round(math.abs(signalScore) * 100))
+    flagTxt = bullTurn or bearTurn ? " ⚡" : math.abs(signalScore) >= 0.7 ? " ★" : ""
+    mainTxt = dirTxt + " " + pctTxt + "%" + flagTxt
+    mainCol = math.abs(signalScore) >= 0.7 ? (signalScore >= 0 ? color.new(#00E676, 0) : color.new(#FF1744, 0)) : (signalScore >= 0 ? color.new(#69F0AE, 0) : color.new(#FF8A80, 0))
+    mainTip = "Composite: " + str.tostring(composite, "#.##") + "
+Phase Z: " + str.tostring(phaseZ, "#.##") + "
+Phase %: " + str.tostring(phasePct, "#.##") + "
+Price Cycle: " + str.tostring(priceCycle, "#.##") + "
+Return Cycle: " + str.tostring(returnCycle, "#.##") + "
+Short Cycle: " + str.tostring(shortCycle, "#.##") + "
+Short %: " + str.tostring(shortPct, "#.##") + "
+Strength: " + str.tostring(strength, "#.##") + "
+Phase: " + str.tostring(phase, "#.##")
+    table.cell(panel, 1, 0, mainTxt, text_color=mainCol, bgcolor=cellBg, text_size=size.small, tooltip=mainTip)
+
+    cycleTxt = "P:" + str.tostring(priceCycle, "#.##")
+    cycleCol = priceCycle >= 0 ? color.new(#FFD54F, 0) : color.new(#FFCCBC, 0)
+    table.cell(panel, 2, 0, cycleTxt, text_color=cycleCol, bgcolor=cellBg, text_size=size.small)
+
+    retTxt = "R:" + str.tostring(returnCycle, "#.##")
+    retCol = returnCycle >= 0 ? color.new(#80CBC4, 0) : color.new(#B2DFDB, 0)
+    table.cell(panel, 3, 0, retTxt, text_color=retCol, bgcolor=cellBg, text_size=size.small)
+
+alertcondition(bullTurn, "Bull Inflection", "▲ cycle reversal bullish")
+alertcondition(bearTurn, "Bear Inflection", "▼ cycle reversal bearish")

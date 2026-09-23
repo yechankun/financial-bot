@@ -38,21 +38,22 @@ const DEFAULT_ETF_SCREEN_CRITERIA = {
   undervalued: {
     score_mode: "weighted_percentile",
     min_metric_count: 3,
-    reason: "낮은 연간 PER/PBR/PSR 조합",
+    reason: "낮은 연간 PER·PBR·PSR 조합",
     metrics: [
       { key: "aggregate_pe_ttm", label: "PER 연간", higher_better: false, weight: 1.0, positive_preferred: true },
       { key: "aggregate_pb", label: "PBR 분기", higher_better: false, weight: 1.0, positive_preferred: true },
       { key: "aggregate_ps_ttm", label: "PSR 연간", higher_better: false, weight: 1.0, positive_preferred: true },
     ],
   },
-  overvalued: {
+  undervalued_cashflow: {
     score_mode: "weighted_percentile",
-    min_metric_count: 3,
-    reason: "높은 연간 PER/PBR/PSR 조합",
+    min_metric_count: 4,
+    reason: "낮은 PER·PBR·EV/EBITDA·P/FCF 조합",
     metrics: [
-      { key: "aggregate_pe_ttm", label: "PER 연간", higher_better: true, weight: 1.0, positive_preferred: true },
-      { key: "aggregate_pb", label: "PBR 분기", higher_better: true, weight: 1.0, positive_preferred: true },
-      { key: "aggregate_ps_ttm", label: "PSR 연간", higher_better: true, weight: 1.0, positive_preferred: true },
+      { key: "aggregate_pe_ttm", label: "PER 연간", higher_better: false, weight: 1.0, positive_preferred: true },
+      { key: "aggregate_pb", label: "PBR 분기", higher_better: false, weight: 1.0, positive_preferred: true },
+      { key: "aggregate_ev_ebitda_ttm", label: "EV/EBITDA", higher_better: false, weight: 1.0, positive_preferred: true },
+      { key: "aggregate_p_fcf_ttm", label: "주가/잉여현금흐름", higher_better: false, weight: 1.0, positive_preferred: true },
     ],
   },
   cashflow_good: {
@@ -92,6 +93,11 @@ const DEFAULT_ETF_SCREEN_CRITERIA = {
       { key: "etf_rsi", min: 75, max: 80, bonus: 0.03 },
     ],
   },
+  momentum_deterioration: {
+    score_mode: "reverse_category",
+    base_category: "momentum",
+    reason: "1M/3M 성과, ADX, MACD, 거래량이 함께 약함",
+  },
   outlier: {
     score_mode: "weighted_abs_zscore",
     min_metric_count: 6,
@@ -115,7 +121,7 @@ const DEFAULT_STOCK_SCREEN_CRITERIA = {
     reason: "ETF 편입·저평가·현금흐름·모멘텀을 함께 만족하는 종목",
     metrics: [
       { key: "included_etf_count", label: "포함 ETF 수", higher_better: true, weight: 1.0 },
-      { key: "included_etf_total_exposure", label: "ETF 보유 총규모", higher_better: true, weight: 1.0 },
+      { key: "included_etf_total_exposure_to_market_cap", label: "시가총액 대비 ETF 보유금액 총규모", higher_better: true, weight: 1.0, format: "ratio_percent" },
       { key: "price_earnings_ttm", label: "PER", higher_better: false, weight: 0.25, positive_preferred: true },
       { key: "price_book_fq", label: "PBR 분기", higher_better: false, weight: 0.25, positive_preferred: true },
       { key: "enterprise_value_ebitda_ttm", label: "EV/EBITDA", higher_better: false, weight: 0.25, positive_preferred: true },
@@ -147,15 +153,43 @@ const DEFAULT_STOCK_SCREEN_CRITERIA = {
   etf_total_exposure: {
     score_mode: "weighted_percentile",
     min_metric_count: 1,
-    reason: "ETF 보유 총규모가 큰 종목",
+    reason: "시가총액 대비 ETF 보유금액 총규모가 큰 종목",
     metrics: [
-      { key: "included_etf_total_exposure", label: "ETF 보유 총규모", higher_better: true, weight: 1.0 },
+      { key: "included_etf_total_exposure_to_market_cap", label: "시가총액 대비 ETF 보유금액 총규모", higher_better: true, weight: 1.0, format: "ratio_percent" },
+    ],
+  },
+  etf_fund_flow_to_market_cap_1m: {
+    score_mode: "weighted_percentile",
+    min_metric_count: 1,
+    reason: "시가총액 대비 ETF 유입금액 1개월 규모가 큰 종목",
+    metrics: [
+      {
+        key: "included_etf_weighted_fund_flow_to_market_cap_1m",
+        label: "시가총액 대비 ETF 유입금액 1개월",
+        higher_better: true,
+        weight: 1.0,
+        format: "ratio_percent",
+      },
+    ],
+  },
+  etf_fund_flow_to_market_cap_3m: {
+    score_mode: "weighted_percentile",
+    min_metric_count: 1,
+    reason: "시가총액 대비 ETF 유입금액 3개월 규모가 큰 종목",
+    metrics: [
+      {
+        key: "included_etf_weighted_fund_flow_to_market_cap_3m",
+        label: "시가총액 대비 ETF 유입금액 3개월",
+        higher_better: true,
+        weight: 1.0,
+        format: "ratio_percent",
+      },
     ],
   },
   undervalued: {
     score_mode: "weighted_percentile",
     min_metric_count: 4,
-    reason: "낮은 PER/PBR/EV/EBITDA/주가잉여현금흐름 조합",
+    reason: "낮은 PER·PBR·EV/EBITDA·P/FCF 조합",
     metrics: [
       { key: "price_earnings_ttm", label: "PER", higher_better: false, weight: 1.0, positive_preferred: true },
       { key: "price_book_fq", label: "PBR 분기", higher_better: false, weight: 1.0, positive_preferred: true },
@@ -163,15 +197,14 @@ const DEFAULT_STOCK_SCREEN_CRITERIA = {
       { key: "price_free_cash_flow_ttm", label: "주가/잉여현금흐름", higher_better: false, weight: 1.0, positive_preferred: true },
     ],
   },
-  overvalued: {
+  undervalued_psr: {
     score_mode: "weighted_percentile",
-    min_metric_count: 4,
-    reason: "높은 PER/PBR/EV/EBITDA/주가잉여현금흐름 조합",
+    min_metric_count: 3,
+    reason: "낮은 PER·PBR·PSR 조합",
     metrics: [
-      { key: "price_earnings_ttm", label: "PER", higher_better: true, weight: 1.0, positive_preferred: true },
-      { key: "price_book_fq", label: "PBR 분기", higher_better: true, weight: 1.0, positive_preferred: true },
-      { key: "enterprise_value_ebitda_ttm", label: "EV/EBITDA", higher_better: true, weight: 1.0, positive_preferred: true },
-      { key: "price_free_cash_flow_ttm", label: "주가/잉여현금흐름", higher_better: true, weight: 1.0, positive_preferred: true },
+      { key: "price_earnings_ttm", label: "PER", higher_better: false, weight: 1.0, positive_preferred: true },
+      { key: "price_book_fq", label: "PBR 분기", higher_better: false, weight: 1.0, positive_preferred: true },
+      { key: "price_sales_current", label: "PSR", higher_better: false, weight: 1.0, positive_preferred: true },
     ],
   },
   cashflow_good: {
@@ -212,6 +245,11 @@ const DEFAULT_STOCK_SCREEN_CRITERIA = {
       { key: "rsi", min: 50, max: 55, bonus: 0.03 },
       { key: "rsi", min: 75, max: 80, bonus: 0.03 },
     ],
+  },
+  momentum_deterioration: {
+    score_mode: "reverse_category",
+    base_category: "momentum",
+    reason: "1M/3M 성과, ADX, 거래량, MACD가 함께 약함",
   },
   outlier: {
     score_mode: "weighted_abs_zscore",
@@ -283,7 +321,7 @@ async function loadScopedScreenPreference({ discordUserId, dataset, category }) 
   return null;
 }
 
-export async function runEtfScreen({ category, limit, criteria, discordUserId }) {
+export async function runEtfScreen({ category, limit, criteria, reverse = false, discordUserId }) {
   let effectiveCriteria = criteria;
   if (
     category !== "overview" &&
@@ -304,6 +342,7 @@ export async function runEtfScreen({ category, limit, criteria, discordUserId })
     category,
     limit,
     criteria: effectiveCriteria,
+    reverse,
   });
 }
 
@@ -315,6 +354,7 @@ export async function runStockScreen({
   category,
   limit,
   criteria,
+  reverse = false,
   discordUserId,
   industryHighlights,
   industryOnly,
@@ -343,6 +383,7 @@ export async function runStockScreen({
     category,
     limit,
     criteria: effectiveCriteria,
+    reverse,
     industryHighlights,
     industryOnly,
     industries,

@@ -25,6 +25,8 @@ __pycache__/
 /renderer/runs/
 /renderer/node_modules/
 /renderer/.pinets/
+/renderer/outputs/
+/.pinets/cache/
 *.log
 *.sqlite3
 *.sqlite3-*

@@ -1,0 +1,139 @@
+//@version=6
+indicator("수익률 + 볼린저밴드", overlay=false)
+
+p1 = input.int(70, "수익률 기간 1 (단기)", minval=1)
+p2 = input.int(140, "수익률 기간 2 (중기)", minval=1)
+p3 = input.int(210, "수익률 기간 3 (장기)", minval=1)
+
+show_avg = input.bool(false, "수익률 평균 표시")
+
+avg_len = input.int(128, "평균 길이")
+avg2_len = input.int(256, "평균 길이2")
+
+show_p1_return = input.bool(true, "기간1(p1) 수익률 표시")
+show_p2_return = input.bool(false, "기간2(p2) 수익률 표시")
+show_p3_return = input.bool(false, "기간3(p3) 수익률 표시")
+
+show_p1_bb = input.bool(true, "기간1(p1) 볼린저밴드 표시")
+show_p2_bb = input.bool(false, "기간2(p2) 볼린저밴드 표시")
+show_p3_bb = input.bool(false, "기간3(p3) 볼린저밴드 표시")
+
+show_bb_1 = input.bool(true, "볼린저밴드 #1 표시")
+len_bb_1 = input.int(520, "볼린저밴드 #1 기간", minval=1)
+std_1 = input.float(2.0, "표준편차 #1", step=0.1)
+
+show_bb_2 = input.bool(false, "볼린저밴드 #2 표시")
+len_bb_2 = input.int(520, "볼린저밴드 #2 기간", minval=1)
+std_2 = input.float(3.0, "표준편차 #2", step=0.1)
+
+show_bb_3 = input.bool(false, "볼린저밴드 #3 표시")
+len_bb_3 = input.int(520, "볼린저밴드 #3 기간", minval=1)
+std_3 = input.float(3.5, "표준편차 #3", step=0.1)
+
+blue1 = color.new(#00fff2, 0)
+blue2 = color.new(color.blue, 0)
+blue3 = color.new(#0000ff, 0)
+
+inv_blue1 = color.new(#ff000d, 0)
+inv_blue2 = color.new(#ffaeae, 0)
+inv_blue3 = color.new(#ffcccc, 0)
+
+avg_color1 = color.new(#fbff00, 0)
+avg_color2 = color.new(#e98930, 0)
+avg_color3 = color.new(#683700, 0)
+
+avg2_color1 = color.new(#abff00, 0)
+avg2_color2 = color.new(#b98930, 0)
+avg2_color3 = color.new(#383700, 0)
+
+r_s1 = (close - close[p1]) / close[p1] * 100
+r_s2 = (close - close[p2]) / close[p2] * 100
+r_s3 = (close - close[p3]) / close[p3] * 100
+
+avg_s1 = ta.sma(r_s1, avg_len)
+avg_s2 = ta.sma(r_s2, avg_len)
+avg_s3 = ta.sma(r_s3, avg_len)
+
+avg2_s1 = ta.sma(r_s1, avg2_len)
+avg2_s2 = ta.sma(r_s2, avg2_len)
+avg2_s3 = ta.sma(r_s3, avg2_len)
+
+b_s1_1 = ta.sma(r_s1, len_bb_1)
+d_s1_1 = ta.stdev(r_s1, len_bb_1)
+u_s1_1 = b_s1_1 + std_1 * d_s1_1
+l_s1_1 = b_s1_1 - std_1 * d_s1_1
+
+b_s2_1 = ta.sma(r_s2, len_bb_1)
+d_s2_1 = ta.stdev(r_s2, len_bb_1)
+u_s2_1 = b_s2_1 + std_1 * d_s2_1
+l_s2_1 = b_s2_1 - std_1 * d_s2_1
+
+b_s3_1 = ta.sma(r_s3, len_bb_1)
+d_s3_1 = ta.stdev(r_s3, len_bb_1)
+u_s3_1 = b_s3_1 + std_1 * d_s3_1
+l_s3_1 = b_s3_1 - std_1 * d_s3_1
+
+b_s1_2 = ta.sma(r_s1, len_bb_2)
+d_s1_2 = ta.stdev(r_s1, len_bb_2)
+u_s1_2 = b_s1_2 + std_2 * d_s1_2
+l_s1_2 = b_s1_2 - std_2 * d_s1_2
+
+b_s2_2 = ta.sma(r_s2, len_bb_2)
+d_s2_2 = ta.stdev(r_s2, len_bb_2)
+u_s2_2 = b_s2_2 + std_2 * d_s2_2
+l_s2_2 = b_s2_2 - std_2 * d_s2_2
+
+b_s3_2 = ta.sma(r_s3, len_bb_2)
+d_s3_2 = ta.stdev(r_s3, len_bb_2)
+u_s3_2 = b_s3_2 + std_2 * d_s3_2
+l_s3_2 = b_s3_2 - std_2 * d_s3_2
+
+b_s1_3 = ta.sma(r_s1, len_bb_3)
+d_s1_3 = ta.stdev(r_s1, len_bb_3)
+u_s1_3 = b_s1_3 + std_3 * d_s1_3
+l_s1_3 = b_s1_3 - std_3 * d_s1_3
+
+b_s2_3 = ta.sma(r_s2, len_bb_3)
+d_s2_3 = ta.stdev(r_s2, len_bb_3)
+u_s2_3 = b_s2_3 + std_3 * d_s2_3
+l_s2_3 = b_s2_3 - std_3 * d_s2_3
+
+b_s3_3 = ta.sma(r_s3, len_bb_3)
+d_s3_3 = ta.stdev(r_s3, len_bb_3)
+u_s3_3 = b_s3_3 + std_3 * d_s3_3
+l_s3_3 = b_s3_3 - std_3 * d_s3_3
+
+plot(show_p1_return ? r_s1 : na, "수익률 (기간1)", color=blue1)
+plot(show_p2_return ? r_s2 : na, "수익률 (기간2)", color=blue2)
+plot(show_p3_return ? r_s3 : na, "수익률 (기간3)", color=blue3)
+
+plot(show_avg and show_p1_return ? avg_s1 : na, "수익률 평균 (기간1)", color=avg_color1)
+plot(show_avg and show_p2_return ? avg_s2 : na, "수익률 평균 (기간2)", color=avg_color2)
+plot(show_avg and show_p3_return ? avg_s3 : na, "수익률 평균 (기간3)", color=avg_color3)
+
+plot(show_avg and show_p1_return ? avg2_s1 : na, "수익률 평균2 (기간1)", color=avg2_color1)
+plot(show_avg and show_p2_return ? avg2_s2 : na, "수익률 평균2 (기간2)", color=avg2_color2)
+plot(show_avg and show_p3_return ? avg2_s3 : na, "수익률 평균2 (기간3)", color=avg2_color3)
+
+plot(show_p1_bb and show_bb_1 ? u_s1_1 : na, "r_s1 BB#1 상단", color=inv_blue1)
+plot(show_p1_bb and show_bb_1 ? math.max(l_s1_1, -100) : na, "r_s1 BB#1 하단", color=inv_blue1)
+plot(show_p1_bb and show_bb_2 ? u_s1_2 : na, "r_s1 BB#2 상단", color=inv_blue1)
+plot(show_p1_bb and show_bb_2 ? math.max(l_s1_2, -100) : na, "r_s1 BB#2 하단", color=inv_blue1)
+plot(show_p1_bb and show_bb_3 ? u_s1_3 : na, "r_s1 BB#3 상단", color=inv_blue1)
+plot(show_p1_bb and show_bb_3 ? math.max(l_s1_3, -100) : na, "r_s1 BB#3 하단", color=inv_blue1)
+
+plot(show_p2_bb and show_bb_1 ? u_s2_1 : na, "r_s2 BB#1 상단", color=inv_blue2)
+plot(show_p2_bb and show_bb_1 ? math.max(l_s2_1, -100) : na, "r_s2 BB#1 하단", color=inv_blue2)
+plot(show_p2_bb and show_bb_2 ? u_s2_2 : na, "r_s2 BB#2 상단", color=inv_blue2)
+plot(show_p2_bb and show_bb_2 ? math.max(l_s2_2, -100) : na, "r_s2 BB#2 하단", color=inv_blue2)
+plot(show_p2_bb and show_bb_3 ? u_s2_3 : na, "r_s2 BB#3 상단", color=inv_blue2)
+plot(show_p2_bb and show_bb_3 ? math.max(l_s2_3, -100) : na, "r_s2 BB#3 하단", color=inv_blue2)
+
+plot(show_p3_bb and show_bb_1 ? u_s3_1 : na, "r_s3 BB#1 상단", color=inv_blue3)
+plot(show_p3_bb and show_bb_1 ? math.max(l_s3_1, -100) : na, "r_s3 BB#1 하단", color=inv_blue3)
+plot(show_p3_bb and show_bb_2 ? u_s3_2 : na, "r_s3 BB#2 상단", color=inv_blue3)
+plot(show_p3_bb and show_bb_2 ? math.max(l_s3_2, -100) : na, "r_s3 BB#2 하단", color=inv_blue3)
+plot(show_p3_bb and show_bb_3 ? u_s3_3 : na, "r_s3 BB#3 상단", color=inv_blue3)
+plot(show_p3_bb and show_bb_3 ? math.max(l_s3_3, -100) : na, "r_s3 BB#3 하단", color=inv_blue3)
+
+hline(0, "0라인", color.gray, hline.style_dotted)

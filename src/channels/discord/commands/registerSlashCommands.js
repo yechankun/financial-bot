@@ -46,11 +46,41 @@ export function buildCommandJson(activeSkills, { internalCommandsEnabled }) {
 export async function registerSlashCommands({ internalCommandsEnabled = true } = {}) {
   const activeSkills = internalCommandsEnabled ? await loadActiveSkills() : [];
   const rest = new REST({ version: "10" }).setToken(config.discordToken);
-  const route = config.guildId
-    ? Routes.applicationGuildCommands(config.applicationId, config.guildId)
-    : Routes.applicationCommands(config.applicationId);
+  const body = buildCommandJson(activeSkills, { internalCommandsEnabled });
+  const cleanupGuildIds = [
+    ...new Set(
+      (config.discordCommandCleanupGuildIds || [])
+        .map((guildId) => String(guildId || "").trim())
+        .filter(Boolean),
+    ),
+  ];
 
-  await rest.put(route, {
-    body: buildCommandJson(activeSkills, { internalCommandsEnabled }),
-  });
+  if (config.guildId) {
+    const guildRoute = Routes.applicationGuildCommands(config.applicationId, config.guildId);
+    const globalRoute = Routes.applicationCommands(config.applicationId);
+
+    await rest.put(globalRoute, { body: [] });
+    for (const cleanupGuildId of cleanupGuildIds) {
+      if (cleanupGuildId === config.guildId) {
+        continue;
+      }
+      const cleanupRoute = Routes.applicationGuildCommands(
+        config.applicationId,
+        cleanupGuildId,
+      );
+      await rest.put(cleanupRoute, { body: [] });
+    }
+    await rest.put(guildRoute, { body });
+    return;
+  }
+
+  const globalRoute = Routes.applicationCommands(config.applicationId);
+  for (const cleanupGuildId of cleanupGuildIds) {
+    const cleanupRoute = Routes.applicationGuildCommands(
+      config.applicationId,
+      cleanupGuildId,
+    );
+    await rest.put(cleanupRoute, { body: [] });
+  }
+  await rest.put(globalRoute, { body });
 }

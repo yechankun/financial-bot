@@ -135,6 +135,7 @@ export async function handleEtfScreenCommand(interaction) {
   }
 
   const category = interaction.options.getString("category", true);
+  const reverse = interaction.options.getBoolean("reverse") || false;
   const limit =
     interaction.options.getInteger("limit") ||
     (category === "overview" ? 1 : 5);
@@ -146,6 +147,7 @@ export async function handleEtfScreenCommand(interaction) {
       category,
       limit,
       criteria: "",
+      reverse,
       discordUserId: interaction.user.id,
     }),
   );
@@ -239,6 +241,7 @@ export async function handleStockScreenCommand(interaction) {
     return;
   }
   const category = interaction.options.getString("category", true);
+  const reverse = interaction.options.getBoolean("reverse") || false;
   const industryHighlights = subcommand === "industry";
   const industryOnly = subcommand === "industry-only";
   const isOverview = category === "overview";
@@ -262,6 +265,7 @@ export async function handleStockScreenCommand(interaction) {
       category,
       limit,
       criteria: "",
+      reverse,
       discordUserId: interaction.user.id,
       industryHighlights,
       industryOnly,

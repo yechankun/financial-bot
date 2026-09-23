@@ -1,6 +1,6 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
+import { getRendererCacheDb } from './cache-db';
 import type { Candle } from './pine-workbench';
 
 export type FinraMetric = 'short-volume' | 'short-exempt-volume' | 'total-volume' | 'short-ratio';
@@ -16,7 +16,10 @@ type FinraRecord = {
 
 const FINRA_BASE_URL = 'https://cdn.finra.org/equity/regsho/daily';
 const FINRA_PREFIX = 'CNMS';
-const FINRA_CACHE_DIR = path.join('.pinets', 'cache', 'finra');
+const FINRA_BACKFILL_FETCH_CONCURRENCY = 6;
+const FINRA_UNAVAILABLE_TTL_MS = 60 * 60 * 1000;
+
+const finraDateBackfillInFlight = new Map<string, Promise<void>>();
 
 function invariant(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -75,53 +78,165 @@ function metricValue(record: FinraRecord, metric: FinraMetric) {
     return record.shortVolume;
 }
 
-async function ensureCacheDir(baseDir: string) {
-    const cacheDir = path.resolve(baseDir, FINRA_CACHE_DIR);
-    await fs.mkdir(cacheDir, { recursive: true });
-    return cacheDir;
+async function getFinraDb(baseDir: string) {
+    return getRendererCacheDb(baseDir);
 }
 
-async function readOrFetchDailyFile(baseDir: string, dateId: string) {
-    const cacheDir = await ensureCacheDir(baseDir);
-    const cachePath = path.join(cacheDir, `${FINRA_PREFIX}shvol${dateId}.txt`);
-    try {
-        return await fs.readFile(cachePath, 'utf8');
-    } catch (error) {
-        if ((error as { code?: string }).code !== 'ENOENT') throw error;
-    }
-
+async function fetchRemoteDailyFile(dateId: string) {
     const url = `${FINRA_BASE_URL}/${FINRA_PREFIX}shvol${dateId}.txt`;
     const response = await fetch(url, {
+        signal: AbortSignal.timeout(20_000),
         headers: {
             'user-agent': 'Mozilla/5.0 PineTS-Local-Workbench',
         },
     });
-    if (response.status === 404 || response.status === 403) return null;
+    // FINRA's CDN also returns AccessDenied/403 for unpublished dates (e.g. holidays).
+    // Cache this only briefly so a later publication or access recovery is retried.
+    if (response.status === 404 || response.status === 403) {
+        return { status: 'unavailable' as const, text: null };
+    }
     if (!response.ok) {
         throw new Error(`FINRA request failed with ${response.status} for ${dateId}.`);
     }
 
     const text = await response.text();
-    await fs.writeFile(cachePath, text, 'utf8');
-    return text;
+    if (!text.startsWith('Date|Symbol|') || !text.includes(`${dateId}|`)) {
+        throw new Error(`Invalid FINRA daily file for ${dateId}.`);
+    }
+    return { status: 'ready' as const, text };
 }
 
-async function fetchDailyRecord(baseDir: string, symbol: string, dateId: string): Promise<FinraRecord | null> {
-    const text = await readOrFetchDailyFile(baseDir, dateId);
-    if (!text) return null;
+function parseFinraDailyText(text: string, dateId: string) {
+    const records: FinraRecord[] = [];
+    const lines = text.split(/\r?\n/);
+    for (const line of lines) {
+        if (!line || !line.startsWith(`${dateId}|`)) continue;
+        const [, symbol, shortVolume, shortExemptVolume, totalVolume, market] = line.split('|');
+        if (!symbol) continue;
+        const parsedShortVolume = Number(shortVolume);
+        const parsedShortExemptVolume = Number(shortExemptVolume);
+        const parsedTotalVolume = Number(totalVolume);
+        if ([parsedShortVolume, parsedShortExemptVolume, parsedTotalVolume].some((value) => !Number.isFinite(value) || value < 0 || !Number.isInteger(value))) continue;
+        records.push({
+            date: dateId,
+            symbol,
+            shortVolume: parsedShortVolume,
+            shortExemptVolume: parsedShortExemptVolume,
+            totalVolume: parsedTotalVolume,
+            market: market ?? '',
+        });
+    }
+    return records;
+}
 
-    const prefix = `${dateId}|${symbol}|`;
-    const line = text.split(/\r?\n/).find((item) => item.startsWith(prefix));
-    if (!line) return null;
-    const [, rowSymbol, shortVolume, shortExemptVolume, totalVolume, market] = line.split('|');
-    return {
-        date: dateId,
-        symbol: rowSymbol,
-        shortVolume: Number(shortVolume),
-        shortExemptVolume: Number(shortExemptVolume),
-        totalVolume: Number(totalVolume),
-        market: market ?? '',
+function persistFetchedDates(
+    db: DatabaseSync,
+    items: Array<{
+        dateId: string;
+        remote: Awaited<ReturnType<typeof fetchRemoteDailyFile>>;
+        fetchedAt: number;
+    }>,
+) {
+    if (items.length === 0) return;
+
+    const insertDaily = db.prepare(`
+        INSERT OR REPLACE INTO finra_daily(
+            date,
+            symbol,
+            short_volume,
+            short_exempt_volume,
+            total_volume,
+            market
+        ) VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const upsertState = db.prepare('INSERT OR REPLACE INTO finra_file_state(date, status, fetched_at) VALUES (?, ?, ?)');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+        for (const { dateId, remote, fetchedAt } of items) {
+            if (remote.status === 'ready' && remote.text) {
+                const records = parseFinraDailyText(remote.text, dateId);
+                for (const record of records) {
+                    insertDaily.run(
+                        record.date,
+                        record.symbol,
+                        record.shortVolume,
+                        record.shortExemptVolume,
+                        record.totalVolume,
+                        record.market,
+                    );
+                }
+            }
+            upsertState.run(dateId, remote.status, fetchedAt);
+        }
+        db.exec('COMMIT');
+    } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+    }
+}
+
+async function ensureDateBackfilled(baseDir: string, dateId: string) {
+    const { db, dbPath } = await getFinraDb(baseDir);
+    const inflightKey = `${dbPath}:${dateId}`;
+    const inflight = finraDateBackfillInFlight.get(inflightKey);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+        const existing = db.prepare('SELECT status, fetched_at FROM finra_file_state WHERE date = ?').get(dateId) as { status: string; fetched_at: number } | undefined;
+        if (existing?.status === 'ready' && db.prepare('SELECT 1 FROM finra_daily WHERE date = ? LIMIT 1').get(dateId)) return;
+        if (existing?.status === 'unavailable' && Date.now() - existing.fetched_at < FINRA_UNAVAILABLE_TTL_MS) return;
+
+        const remote = await fetchRemoteDailyFile(dateId);
+        const fetchedAt = Date.now();
+        persistFetchedDates(db, [{ dateId, remote, fetchedAt }]);
+    })().finally(() => {
+        finraDateBackfillInFlight.delete(inflightKey);
+    });
+
+    finraDateBackfillInFlight.set(inflightKey, promise);
+    return promise;
+}
+
+export async function backfillFinraDates(baseDir: string, dateIds: string[]) {
+    if (dateIds.some((dateId) => !/^\d{8}$/.test(dateId))) throw new Error('Invalid FINRA date.');
+    let cursor = 0;
+    const failures: unknown[] = [];
+    const worker = async () => {
+        while (cursor < dateIds.length) {
+            const dateId = dateIds[cursor++];
+            try {
+                // Each successful date is committed immediately, and overlapping symbol
+                // requests share one fetch for that date.
+                await ensureDateBackfilled(baseDir, dateId);
+            } catch (error) {
+                failures.push(error);
+            }
+        }
     };
+    await Promise.all(Array.from({ length: Math.min(FINRA_BACKFILL_FETCH_CONCURRENCY, dateIds.length) }, worker));
+    if (failures.length) throw new AggregateError(failures, 'FINRA backfill incomplete; successful dates were retained.');
+}
+
+async function fetchDailyRecordsFromDb(baseDir: string, symbol: string, dateIds: string[]) {
+    if (dateIds.length === 0) return [] as FinraRecord[];
+    const { db } = await getFinraDb(baseDir);
+    const placeholders = dateIds.map(() => '?').join(', ');
+    const rows = db.prepare(
+        `
+            SELECT
+                date,
+                symbol,
+                short_volume AS shortVolume,
+                short_exempt_volume AS shortExemptVolume,
+                total_volume AS totalVolume,
+                market
+            FROM finra_daily
+            WHERE symbol = ?
+              AND date IN (${placeholders})
+            ORDER BY date DESC
+        `,
+    ).all(symbol, ...dateIds) as FinraRecord[];
+    return rows;
 }
 
 function aggregateSyntheticCandles(candles: Candle[], timeframe: 'D' | 'W' | 'M') {
@@ -174,10 +289,11 @@ export async function fetchFinraCandles(
         candidateDates.push(formatDateId(current));
     }
 
-    const batchSize = 20;
+    const batchSize = timeframe === 'D' ? 120 : timeframe === 'W' ? 80 : 60;
     for (let index = 0; index < candidateDates.length; index += batchSize) {
         const batch = candidateDates.slice(index, index + batchSize);
-        const batchRecords = await Promise.all(batch.map((dateId) => fetchDailyRecord(baseDir, baseSymbol, dateId)));
+        await backfillFinraDates(baseDir, batch);
+        const batchRecords = await fetchDailyRecordsFromDb(baseDir, baseSymbol, batch);
         for (const record of batchRecords) {
             if (record) records.push(record);
         }

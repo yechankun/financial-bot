@@ -6,7 +6,8 @@ MAC_RUNTIME_ROOT="/Users/yechankun/Runtime/financial-bot-worker"
 MAC_HOST="macbook"
 
 # 1. report jobs created by ingress
-rsync -az --delete \
+rsync -az --ignore-existing \
+  --include='*.json' --exclude='*' \
   "${SERVER_RUNTIME_ROOT}/runs/report-jobs/pending/" \
   "${MAC_HOST}:${MAC_RUNTIME_ROOT}/runs/report-jobs/pending/"
 

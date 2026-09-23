@@ -1,3 +1,4 @@
+import "dotenv/config";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -51,26 +52,12 @@ async function resolveSiblingPackageEntry() {
 }
 
 async function tryLoadPackageProvider() {
-  const attempts = [];
   const explicitSpecifier = process.env.INTERNAL_PROVIDER_PACKAGE?.trim() || "";
-  const effectiveSpecifier = explicitSpecifier || packageSpecifier;
-
-  const siblingEntry = await resolveSiblingPackageEntry();
-  const shouldPreferSibling =
-    Boolean(siblingEntry) &&
-    (!explicitSpecifier || explicitSpecifier === packageSpecifier);
-
-  if (shouldPreferSibling && siblingEntry && !attempts.includes(siblingEntry)) {
-    attempts.push(siblingEntry);
-  }
-
-  if (effectiveSpecifier && !attempts.includes(effectiveSpecifier)) {
-    attempts.push(effectiveSpecifier);
-  }
-
-  if (!shouldPreferSibling && siblingEntry && !attempts.includes(siblingEntry)) {
-    attempts.push(siblingEntry);
-  }
+  // An explicit provider is authoritative, including when it fails to load.
+  const siblingEntry = explicitSpecifier ? "" : await resolveSiblingPackageEntry();
+  const attempts = explicitSpecifier
+    ? [explicitSpecifier]
+    : [packageSpecifier, siblingEntry].filter(Boolean);
 
   let lastError = null;
   for (const attempt of attempts) {
@@ -143,11 +130,47 @@ function namespaceProxy(key) {
     {},
     {
       get(_target, prop) {
-        const namespace = requireProviderModule()[key];
-        return namespace[prop];
+        const value = requireProviderModule()[key]?.[prop];
+        if (value === undefined && typeof prop === "string") {
+          throw new Error(`내부 패키지 \`${resolvedSpecifier}\`에 ${key}.${prop}가 없다냥. 공개 런타임과 버전이 맞지 않는다냥.`);
+        }
+        return value;
       },
     },
   );
+}
+
+// Every internal function the public runtime calls. startRuntime refuses to start with a
+// provider that lacks one, instead of failing mid-report with "is not a function".
+export const REQUIRED_INTERNAL_API = {
+  internalResearch: ["createRunId", "runResearchJob"],
+  internalPrompts: ["buildBenchmarkTradePrompt", "buildDecisionPrompt", "buildGuardPrompt", "buildPolicySearchPrompt", "buildReportPrompt", "buildResearchPrompt"],
+  internalBenchmarkStore: ["applyBenchmarkTrade", "buildBenchmarkConsumerPromptContext", "buildBenchmarkDecisionFailureMessage", "buildBenchmarkDecisionMessage", "buildBenchmarkExecutionMarkdown", "buildBenchmarkHistoryMessage", "buildBenchmarkPortfolioMessage", "buildBenchmarkPromptContext", "ensureBenchmarkFiles", "loadBenchmarkSnapshot"],
+  internalBenchmarkQueue: ["drainBenchmarkQueue", "enqueueBenchmarkReport", "ensureBenchmarkQueueDirs"],
+  internalChartQueue: ["drainChartQueue", "enqueueChartJob", "ensureChartQueueDirs", "waitForChartJob"],
+  internalChartTool: ["loadCandidateTickers", "renderCandidateCharts"],
+  internalCollectorRuntime: ["getCollectorStatus", "runCollectorTick"],
+  internalAppStorage: ["authorizeReportAccess", "claimIdleAutoReport", "consumeCommandRateLimit", "deleteScreenPreference", "ensureAutoReportBaseline", "getGuildSubscription", "getReportAccessStatus", "getReportCache", "getUserSubscription", "ingestPaymentEvent", "issuePlanClaimCode", "loadScreenPreference", "loadScreenPreferenceBundle", "markAutoReportPosted", "putGuildSubscription", "putReportCache", "putUserSubscription", "redeemPlanLicense", "saveScreenPreference", "saveScreenPreferenceBundle", "touchUserReportRequest"],
+  internalMarketStorage: ["buildEtfLookupMessage", "buildEtfScreenMessage", "buildIndustryAutocompleteChoices", "buildStockLookupMessage", "buildStockScreenMessage", "buildSymbolAutocompleteChoices", "generateReportScreenerArtifacts", "getMarketDataCapabilities", "resolveReportQuestionScope"],
+};
+
+export const REQUIRED_MARKET_DATA_CONTRACT_VERSION = 1;
+
+export function getMissingInternalApi(module = providerModule) {
+  if (!module) return [];
+  const missing = Object.entries(REQUIRED_INTERNAL_API).flatMap(([namespace, names]) =>
+    names.filter((name) => typeof module[namespace]?.[name] !== "function").map((name) => `${namespace}.${name}`));
+  if (typeof module.internalMarketStorage?.getMarketDataCapabilities === "function") {
+    try {
+      const capabilities = module.internalMarketStorage.getMarketDataCapabilities();
+      if (Number(capabilities?.contractVersion || 0) < REQUIRED_MARKET_DATA_CONTRACT_VERSION) {
+        missing.push(`market-data-contract-v${REQUIRED_MARKET_DATA_CONTRACT_VERSION}`);
+      }
+    } catch {
+      missing.push(`market-data-contract-v${REQUIRED_MARKET_DATA_CONTRACT_VERSION}`);
+    }
+  }
+  return missing;
 }
 
 export function hasInternalProvider() {
@@ -155,11 +178,17 @@ export function hasInternalProvider() {
 }
 
 export function getInternalProviderStatus() {
+  let marketDataCapabilities = null;
+  try {
+    marketDataCapabilities = providerModule?.internalMarketStorage?.getMarketDataCapabilities?.() || null;
+  } catch {}
   return {
     available: Boolean(providerModule),
     requestedMode,
     resolvedMode,
     packageSpecifier: resolvedSpecifier,
+    missingApi: getMissingInternalApi(),
+    marketDataCapabilities,
     error: providerLoadError
       ? providerLoadError instanceof Error
         ? providerLoadError.message

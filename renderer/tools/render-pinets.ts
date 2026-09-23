@@ -1,14 +1,20 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { Resvg } from '@resvg/resvg-js';
 
 import { normalizeId, readCustomScriptCode, readRegistry } from '../lib/pinets-registry';
+import { loadIndicatorPresetCode } from '../lib/preset-loader';
 import {
+    type Candle,
+    type PinePrimaryResourceLoadOptions,
     type PineLineDrawing,
+    type PinePlotPoint,
     type PinePlotSeries,
     type PineShapeMarker,
     type PlotPane,
+    loadPrimaryPineResources,
     loadMarketData,
     runPineOnCandles,
 } from '../lib/pine-workbench';
@@ -18,13 +24,29 @@ import type { DataSource } from '../src/types';
 type CliArgs = {
     source?: DataSource;
     symbol?: string;
+    symbols?: string;
     timeframe?: string;
+    timeframes?: string;
     limit?: number;
     preset?: string;
     script?: string;
     profile?: string;
     codeFile?: string;
     outDir: string;
+    outRoot?: string;
+    outputs?: string;
+    concurrency?: number;
+};
+
+type RenderOutput = 'dataset' | 'csv' | 'png' | 'indicator' | 'meta' | 'latest';
+
+const DEFAULT_OUTPUTS: RenderOutput[] = ['dataset', 'csv', 'png', 'indicator', 'meta'];
+const VALID_OUTPUTS = new Set<RenderOutput>([...DEFAULT_OUTPUTS, 'latest']);
+const DEFAULT_RENDER_WIDTH = 1400;
+const PROFILE_BY_TIMEFRAME: Record<string, string> = {
+    D: 'druckenmiller-default-stack',
+    W: 'druckenmiller-weekly-stack',
+    M: 'druckenmiller-monthly-stack',
 };
 
 type ResolvedScript = {
@@ -34,6 +56,30 @@ type ResolvedScript = {
     code: string;
     warmupBars?: number;
 };
+
+function resolvePrimaryResourceLoadOptions(
+    resolved: ResolvedScripts,
+    target: { source: DataSource; symbol: string; timeframe: string; limit: number },
+): PinePrimaryResourceLoadOptions {
+    const profileId = resolved.profile?.id ?? null;
+    if (target.source === 'yahoo' && profileId === 'short-pressure-stack') {
+        return {
+            includeYahooSnapshot: false,
+            includeYahooSplits: true,
+            includeYahooFinancials: false,
+            includeFinraCandles: true,
+            tolerateYahooSplitFailures: true,
+        };
+    }
+
+    return {
+        includeYahooSnapshot: true,
+        includeYahooSplits: true,
+        includeYahooFinancials: true,
+        includeFinraCandles: true,
+        tolerateYahooSplitFailures: false,
+    };
+}
 
 function invariant(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -49,6 +95,8 @@ Usage:
   bun run render -- --source yahoo --symbol KORU --script my-rsi,my-macd --out-dir outputs/koru
   bun run render -- --source finra --symbol TSLA_SHORT_VOLUME --timeframe D --preset rsi --out-dir outputs/tsla-finra
   bun run render -- --source yahoo --symbol EWY --code-file ./my-indicator.pine --out-dir outputs/custom
+  bun run render -- --source yahoo --symbol EWY --preset ema-cross --outputs dataset,meta --out-dir outputs/json-only
+  bun run render -- --source yahoo --symbols AAPL,MSFT,NVDA --timeframes D,W --out-root outputs/batch --concurrency 4
 `.trim();
 }
 
@@ -57,6 +105,18 @@ function parseCsvList(value: string | undefined) {
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean);
+}
+
+function parseRenderOutputs(value: string | undefined) {
+    const outputs = value ? parseCsvList(value) : [...DEFAULT_OUTPUTS];
+    invariant(outputs.length > 0, '--outputs must include at least one output target.');
+    for (const output of outputs) {
+        invariant(
+            VALID_OUTPUTS.has(output as RenderOutput),
+            `Unsupported output target: ${output}. Valid outputs are ${DEFAULT_OUTPUTS.join(', ')}.`,
+        );
+    }
+    return new Set(outputs as RenderOutput[]);
 }
 
 function defaultPresetForSource(source?: DataSource) {
@@ -68,13 +128,18 @@ function parseCli(): CliArgs {
         options: {
             source: { type: 'string' },
             symbol: { type: 'string' },
+            symbols: { type: 'string' },
             timeframe: { type: 'string' },
+            timeframes: { type: 'string' },
             limit: { type: 'string' },
             preset: { type: 'string' },
             script: { type: 'string' },
             profile: { type: 'string' },
             'code-file': { type: 'string' },
             'out-dir': { type: 'string', default: 'outputs/latest' },
+            'out-root': { type: 'string' },
+            outputs: { type: 'string' },
+            concurrency: { type: 'string' },
             help: { type: 'boolean', short: 'h' },
         },
         allowPositionals: false,
@@ -95,13 +160,18 @@ function parseCli(): CliArgs {
                     ? 'yahoo'
                     : undefined,
         symbol: parsed.values.symbol,
+        symbols: parsed.values.symbols,
         timeframe: parsed.values.timeframe,
+        timeframes: parsed.values.timeframes,
         limit: parsed.values.limit ? Number(parsed.values.limit) : undefined,
         preset: parsed.values.preset,
         script: parsed.values.script,
         profile: parsed.values.profile,
         codeFile: parsed.values['code-file'],
         outDir: parsed.values['out-dir'],
+        outRoot: parsed.values['out-root'],
+        outputs: parsed.values.outputs,
+        concurrency: parsed.values.concurrency ? Number(parsed.values.concurrency) : undefined,
     };
 }
 
@@ -135,7 +205,7 @@ async function resolveScripts(baseDir: string, args: CliArgs) {
                         kind: 'preset' as const,
                         id: preset.id,
                         label: preset.label,
-                        code: preset.code,
+                        code: await loadIndicatorPresetCode(baseDir, preset),
                         warmupBars: preset.warmupBars ?? 0,
                     };
                 }
@@ -158,17 +228,17 @@ async function resolveScripts(baseDir: string, args: CliArgs) {
     const scriptIds = parseCsvList(args.script);
 
     const presets = presetIds.length > 0 ? presetIds : scriptIds.length === 0 ? [defaultPresetForSource(args.source)] : [];
-    const resolvedPresets = presets.map((id) => {
+    const resolvedPresets = await Promise.all(presets.map(async (id) => {
         const preset = INDICATOR_PRESETS.find((item) => item.id === id);
         invariant(preset, `Preset not found: ${id}`);
         return {
             kind: 'preset' as const,
             id: preset.id,
             label: preset.label,
-            code: preset.code,
+            code: await loadIndicatorPresetCode(baseDir, preset),
             warmupBars: preset.warmupBars ?? 0,
         };
-    });
+    }));
 
     const resolvedScripts = await Promise.all(
         scriptIds.map(async (id) => {
@@ -196,6 +266,103 @@ function resolveRenderTarget(args: CliArgs, profileDefaults?: { source?: DataSou
         timeframe: args.timeframe ?? profileDefaults?.timeframe ?? 'D',
         limit: args.limit ?? profileDefaults?.limit ?? 320,
     };
+}
+
+type ResolvedScripts = Awaited<ReturnType<typeof resolveScripts>>;
+type RenderTarget = ReturnType<typeof resolveRenderTarget>;
+
+type RenderSummary = {
+    outDir: string;
+    outputs: RenderOutput[];
+    datasetPath: string | null;
+    csvPath: string | null;
+    pngPath: string | null;
+    codePath: string | null;
+    metaPath: string | null;
+    latestPath: string | null;
+    latestSeries: Record<string, number | null>;
+    bars: number;
+    series: string[];
+    scripts: string[];
+    profile: string | null;
+    symbol: string;
+    timeframe: string;
+    source: DataSource;
+};
+
+function getLatestFiniteSeriesValue(series: PinePlotSeries) {
+    const points = Array.isArray(series.data) ? series.data : [];
+    for (let index = points.length - 1; index >= 0; index -= 1) {
+        const value = Number(points[index]?.value);
+        if (Number.isFinite(value)) {
+            return value;
+        }
+    }
+    return null;
+}
+
+const RECENT_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+function buildRecentWindow(visibleCandles: Candle[], mergedSeries: PinePlotSeries[]) {
+    const lastOpenTime = Number(visibleCandles.at(-1)?.openTime ?? 0);
+    const cutoffTime = Number.isFinite(lastOpenTime) && lastOpenTime > 0 ? lastOpenTime - RECENT_WINDOW_MS : 0;
+    const recentCandles = visibleCandles.filter((candle) => Number(candle.openTime) >= cutoffTime);
+    const recentSeries = mergedSeries.map((series) => ({
+        title: series.title,
+        pane: series.pane,
+        style: series.style,
+        data: (Array.isArray(series.data) ? series.data : []).filter((point) => Number(point?.time) >= cutoffTime),
+    }));
+    return {
+        windowDays: 90,
+        cutoffTime,
+        candles: recentCandles,
+        series: recentSeries,
+    };
+}
+
+type BatchJob = {
+    symbol: string;
+    timeframe: string;
+    outDir: string;
+    resolved: ResolvedScripts;
+    target: RenderTarget;
+};
+
+function hasExplicitScriptSelection(args: CliArgs) {
+    return Boolean(args.codeFile || args.profile || args.preset || args.script);
+}
+
+function sanitizeOutputSegment(value: string) {
+    return value.replaceAll(':', '_').replaceAll('/', '_');
+}
+
+function resolveTimeframeProfile(timeframe: string) {
+    const profile = PROFILE_BY_TIMEFRAME[timeframe];
+    invariant(profile, `Unsupported timeframe for batch render: ${timeframe}`);
+    return profile;
+}
+
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T, index: number) => Promise<R>,
+) {
+    const limit = Math.max(1, Math.floor(concurrency));
+    const results = new Array<R>(items.length);
+    let cursor = 0;
+    const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (true) {
+            const index = cursor;
+            cursor += 1;
+            if (index >= items.length) {
+                return;
+            }
+            results[index] = await worker(items[index], index);
+        }
+    });
+    await Promise.all(runners);
+    return results;
 }
 
 function prefixSeries(series: PinePlotSeries[], label: string, multiScript: boolean): PinePlotSeries[] {
@@ -343,6 +510,24 @@ function seriesTitleSuffix(title: string) {
     return index >= 0 ? title.slice(index + separator.length) : title;
 }
 
+function isAnonymousReferenceSeries(item: PinePlotSeries) {
+    const suffix = seriesTitleSuffix(item.title).trim();
+    return /^#\d+$/.test(suffix);
+}
+
+function isConstantSeries(item: PinePlotSeries) {
+    if (item.data.length === 0) return false;
+    const first = item.data[0]?.value;
+    if (!Number.isFinite(first)) return false;
+    return item.data.every((point) => point.value === first);
+}
+
+function shouldShowLegendSeries(item: PinePlotSeries) {
+    if (isAnonymousReferenceSeries(item)) return false;
+    if (item.pane === 'oscillator' && isConstantSeries(item)) return false;
+    return true;
+}
+
 function colorWithAlpha(color: string, alpha: number) {
     if (color.startsWith('#')) {
         let hex = color.slice(1);
@@ -362,7 +547,59 @@ function colorWithAlpha(color: string, alpha: number) {
     return color;
 }
 
-function renderSvg(
+function renderColoredLine(
+    points: Array<PinePlotPoint | null>,
+    xForIndex: (index: number) => number,
+    yForValue: (value: number) => number,
+    style: string,
+    fallbackColor: string,
+    strokeWidth: number,
+) {
+    const elements: string[] = [];
+    let previousPoint: PinePlotPoint | null = null;
+    let previousIndex = -1;
+
+    const pointColor = (point: PinePlotPoint | null) =>
+        point && typeof point.options?.color === 'string' ? String(point.options.color) : fallbackColor;
+
+    for (let index = 0; index < points.length; index += 1) {
+        const point = points[index];
+        if (!point) {
+            previousPoint = null;
+            previousIndex = -1;
+            continue;
+        }
+
+        if (!previousPoint) {
+            previousPoint = point;
+            previousIndex = index;
+            continue;
+        }
+
+        const x1 = xForIndex(previousIndex);
+        const y1 = yForValue(previousPoint.value);
+        const x2 = xForIndex(index);
+        const y2 = yForValue(point.value);
+        const stroke = pointColor(point);
+
+        if (style === 'stepline') {
+            elements.push(
+                `<path d="M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" />`,
+            );
+        } else {
+            elements.push(
+                `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" />`,
+            );
+        }
+
+        previousPoint = point;
+        previousIndex = index;
+    }
+
+    return elements.join('\n');
+}
+
+export function renderSvg(
     symbol: string,
     timeframe: string,
     candles: Awaited<ReturnType<typeof loadMarketData>>['candles'],
@@ -371,15 +608,16 @@ function renderSvg(
     markers: PineShapeMarker[],
     options?: { showVolumePanel?: boolean },
 ) {
-    const width = 1600;
-    const margin = { top: 84, right: 124, bottom: 56, left: 74 };
+    const width = DEFAULT_RENDER_WIDTH;
+    const margin = { top: 84, right: 156, bottom: 56, left: 74 };
+    const plotRightPadding = 34;
+    const plotInsetX = 18;
     const overlay = series.filter((item) => item.pane === 'overlay');
     const oscillator = series.filter((item) => item.pane === 'oscillator');
     const overlayMarkers = markers.filter((item) => item.pane === 'overlay');
     const oscillatorMarkers = markers.filter((item) => item.pane === 'oscillator');
-    const oscillatorOnly = overlay.length === 0 && lines.length === 0 && overlayMarkers.length === 0;
-    const showMainPanel = !oscillatorOnly;
-    const showVolumePanel = (options?.showVolumePanel ?? true) && !oscillatorOnly;
+    const showMainPanel = true;
+    const showVolumePanel = options?.showVolumePanel ?? true;
 
     const oscillatorGroupMap = new Map<string, { label: string; series: PinePlotSeries[]; markers: PineShapeMarker[] }>();
     const hasPrefixedOscillator = oscillator.some((item) => item.title.includes(' · '));
@@ -402,17 +640,27 @@ function renderSvg(
     const oscillatorGroups = [...oscillatorGroupMap.values()];
     const hasOscillator = oscillatorGroups.length > 0;
 
+    const legendSeries = series.filter(shouldShowLegendSeries);
+    const legendColumns = 4;
+    const legendRowHeight = 24;
+    const legendStartY = 94;
+    const legendRows = legendSeries.length > 0 ? Math.ceil(legendSeries.length / legendColumns) : 0;
+    const headerBottom = legendStartY + legendRows * legendRowHeight;
+    const mainTop = Math.max(margin.top, headerBottom + 22);
+
     const mainHeight = showMainPanel ? (hasOscillator ? 430 : 620) : 0;
     const volumeHeight = showVolumePanel ? 130 : 0;
-    const oscillatorHeight = hasOscillator ? (oscillatorOnly ? 620 : 220) : 0;
+    const oscillatorHeight = hasOscillator ? 220 : 0;
     const gap = 28;
 
     const chartLeft = margin.left;
-    const chartRight = width - margin.right;
+    const chartRight = width - margin.right - plotRightPadding;
     const chartWidth = chartRight - chartLeft;
-    const mainTop = margin.top;
+    const plotLeft = chartLeft + plotInsetX;
+    const plotRight = chartRight - plotInsetX;
+    const plotWidth = Math.max(plotRight - plotLeft, 1);
     const volumeTop = mainTop + (showMainPanel ? mainHeight + gap : 0);
-    const firstOscillatorTop = oscillatorOnly ? mainTop : volumeTop + (showVolumePanel ? volumeHeight + gap : 0);
+    const firstOscillatorTop = volumeTop + (showVolumePanel ? volumeHeight + gap : 0);
     const totalOscillatorHeight = hasOscillator ? oscillatorGroups.length * oscillatorHeight + Math.max(0, oscillatorGroups.length - 1) * gap : 0;
     const height = Math.max(
         1000,
@@ -424,10 +672,10 @@ function renderSvg(
     const priceSpan = Math.max(priceMax - priceMin, Math.max(Math.abs(priceMax) * 0.001, 1e-6));
     const volumeMax = Math.max(...candles.map((c) => c.volume), 1);
 
-    const xStep = chartWidth / Math.max(candles.length - 1, 1);
+    const xStep = plotWidth / Math.max(candles.length, 1);
     const candleBodyWidth = Math.max(2, Math.min(10, xStep * 0.6));
 
-    const xForIndex = (index: number) => chartLeft + index * xStep;
+    const xForIndex = (index: number) => plotLeft + (index + 0.5) * xStep;
     const yForPrice = (value: number) => mainTop + ((priceMax - value) / priceSpan) * mainHeight;
     const yForVolume = (value: number) => volumeTop + volumeHeight - (value / volumeMax) * volumeHeight;
 
@@ -563,7 +811,14 @@ function renderSvg(
         ? overlay
               .map(
                   (item) =>
-                      `<path d="${buildPath(alignSeriesValues(item.title), yForPrice, item.style)}" fill="none" stroke="${item.color}" stroke-width="2.2" />`,
+                      renderColoredLine(
+                          alignSeriesPoints(item.title),
+                          xForIndex,
+                          yForPrice,
+                          item.style,
+                          item.color,
+                          2.2,
+                      ),
               )
               .join('\n')
         : '';
@@ -607,7 +862,12 @@ function renderSvg(
             .map((item) => {
                 const index = indexForTime(item.time);
                 const x = xForIndex(index);
-                const isBottom = item.location.toLowerCase() === 'bottom';
+                const location = item.location.toLowerCase();
+                const isBottom =
+                    location === 'bottom' ||
+                    location === 'belowbar' ||
+                    location === 'below_bar' ||
+                    location === 'below bar';
                 const y = isBottom ? paneTop + paneHeight - 18 : paneTop + 18;
                 const fill = item.color || (isBottom ? '#00E676' : '#FF1744');
                 const text = item.text || '!';
@@ -619,7 +879,30 @@ function renderSvg(
             })
             .join('\n');
 
-    const overlayMarkerElements = showMainPanel ? markerElements(overlayMarkers, mainTop, mainHeight) : '';
+    const overlayMarkerElements = showMainPanel
+        ? overlayMarkers
+              .map((item) => {
+                  const index = indexForTime(item.time);
+                  const x = xForIndex(index);
+                  const candle = candles[index];
+                  const location = item.location.toLowerCase();
+                  const isBelowBar =
+                      location === 'belowbar' ||
+                      location === 'below_bar' ||
+                      location === 'below bar' ||
+                      location === 'bottom';
+                  const anchorY = isBelowBar ? yForPrice(candle.low) + 16 : yForPrice(candle.high) - 16;
+                  const y = Math.max(mainTop + 14, Math.min(mainTop + mainHeight - 14, anchorY));
+                  const fill = item.color || (isBelowBar ? '#00E676' : '#FF1744');
+                  const text = item.text || '!';
+                  return `
+<g>
+  <circle cx="${x}" cy="${y}" r="10" fill="${fill}" stroke="rgba(10,15,13,0.72)" stroke-width="1.5" />
+  <text x="${x}" y="${y + 4}" fill="#f7fbf8" font-size="12" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-weight="700">${text}</text>
+</g>`;
+              })
+              .join('\n')
+        : '';
 
     const oscillatorPaneBlocks = oscillatorGroups
         .map((group, groupIndex) => {
@@ -672,13 +955,20 @@ function renderSvg(
                                 const h = Math.max(1, Math.abs(baselineY - valueY));
                                 const pointColor =
                                     typeof point?.options?.color === 'string' && point.options.color
-                                        ? colorWithAlpha(String(point.options.color), oscillatorOnly ? 0.95 : 0.85)
-                                        : colorWithAlpha(item.color, oscillatorOnly ? 0.85 : 0.75);
+                                        ? colorWithAlpha(String(point.options.color), 0.85)
+                                        : colorWithAlpha(item.color, 0.75);
                                 return `<rect x="${x - candleBodyWidth / 2}" y="${y}" width="${candleBodyWidth}" height="${h}" fill="${pointColor}" rx="1" />`;
                             })
                             .join('\n');
                     }
-                    return `<path d="${buildPath(aligned, yForOsc, item.style)}" fill="none" stroke="${item.color}" stroke-width="${oscillatorOnly ? 2.6 : 2}" />`;
+                    return renderColoredLine(
+                        alignedPoints,
+                        xForIndex,
+                        yForOsc,
+                        item.style,
+                        item.color,
+                        2,
+                    );
                 })
                 .join('\n');
             const markerSvg = markerElements(group.markers, top, oscillatorHeight);
@@ -686,9 +976,7 @@ function renderSvg(
                 hasPrefixedOscillator && group.label !== '__single__'
                     ? `<text x="${chartLeft + 16}" y="${top + 24}" fill="#b7c8bf" font-size="13" font-family="IBM Plex Mono, monospace">${group.label}</text>`
                     : '';
-            const rect = `<rect x="${chartLeft}" y="${top}" width="${chartWidth}" height="${oscillatorHeight}" fill="${
-                oscillatorOnly ? 'rgba(16,25,21,0.9)' : 'rgba(13,19,16,0.9)'
-            }" stroke="#22342c" rx="${oscillatorOnly ? 20 : 16}" />`;
+            const rect = `<rect x="${chartLeft}" y="${top}" width="${chartWidth}" height="${oscillatorHeight}" fill="rgba(13,19,16,0.9)" stroke="#22342c" rx="16" />`;
 
             return `${rect}
   ${label}
@@ -700,12 +988,12 @@ function renderSvg(
         })
         .join('\n');
 
-    const legendItems = series
+    const legendItems = legendSeries
         .map((item, index) => {
-            const row = Math.floor(index / 6);
-            const col = index % 6;
-            const x = chartLeft + col * 240;
-            const y = 36 + row * 24;
+            const row = Math.floor(index / legendColumns);
+            const col = index % legendColumns;
+            const x = chartLeft + col * 320;
+            const y = legendStartY + row * legendRowHeight;
             return `
 <circle cx="${x}" cy="${y}" r="5" fill="${item.color}" />
 <text x="${x + 14}" y="${y + 5}" fill="#d9e3dd" font-size="16" font-family="Space Grotesk, sans-serif">${item.title}</text>`;
@@ -731,8 +1019,8 @@ function renderSvg(
     </linearGradient>
   </defs>
   <rect width="${width}" height="${height}" fill="url(#bg)" rx="26" />
-  <text x="${chartLeft}" y="28" fill="#f1f6f2" font-size="26" font-family="Space Grotesk, sans-serif">${symbol} · ${timeframe}</text>
-  <text x="${chartLeft}" y="58" fill="#97a89f" font-size="15" font-family="IBM Plex Mono, monospace">Generated with PineTS local renderer</text>
+  <text x="${chartLeft}" y="34" fill="#f1f6f2" font-size="26" font-family="Space Grotesk, sans-serif">${symbol} · ${timeframe}</text>
+  <text x="${chartLeft}" y="62" fill="#97a89f" font-size="15" font-family="IBM Plex Mono, monospace">Generated with PineTS local renderer</text>
   ${legendItems}
 
   ${
@@ -763,161 +1051,364 @@ function renderSvg(
 async function main() {
     const baseDir = process.cwd();
     const args = parseCli();
-    const resolved = await resolveScripts(baseDir, args);
-    invariant(resolved.scripts.length > 0, 'No scripts resolved to render.');
+    const selectedOutputs = parseRenderOutputs(args.outputs);
 
-    const target = resolveRenderTarget(args, resolved.profile?.defaults);
-    const maxWarmupBars = Math.max(0, ...resolved.scripts.map((script) => script.warmupBars ?? 0));
-    const market = await loadMarketData({
-        ...target,
-        limit: target.limit + maxWarmupBars,
-    });
+    const renderSingle = async ({
+        resolved,
+        target,
+        outDir,
+    }: {
+        resolved: ResolvedScripts;
+        target: RenderTarget;
+        outDir: string;
+    }): Promise<RenderSummary> => {
+        invariant(resolved.scripts.length > 0, 'No scripts resolved to render.');
+        const maxWarmupBars = Math.max(0, ...resolved.scripts.map((script) => script.warmupBars ?? 0));
+        const market = await loadMarketData({
+            ...target,
+            limit: target.limit + maxWarmupBars,
+            baseDir,
+        });
+        const primaryResourceLoadOptions = resolvePrimaryResourceLoadOptions(resolved, target);
+        const primaryResources = await loadPrimaryPineResources({
+            source: market.source,
+            symbol: market.symbol,
+            baseDir,
+            timeframe: market.timeframe,
+            limit: market.limit,
+            loadOptions: primaryResourceLoadOptions,
+        });
+        const sharedFinraCache = new Map<string, Promise<Candle[]>>();
+        const sharedLowerTfCandleCache = new Map<string, Promise<Candle[]>>();
 
-    const analyses = await Promise.all(
-        resolved.scripts.map(async (script) => {
-            const result = await runPineOnCandles(market.candles, script.code, {
-                source: market.source,
-                symbol: market.symbol,
-                timeframe: market.timeframe,
-                limit: market.limit,
-                baseDir,
+        const analyses = await Promise.all(
+            resolved.scripts.map(async (script) => {
+                const result = await runPineOnCandles(market.candles, script.code, {
+                    source: market.source,
+                    symbol: market.symbol,
+                    timeframe: market.timeframe,
+                    limit: market.limit,
+                    baseDir,
+                    primaryYahooSnapshot: primaryResources.primaryYahooSnapshot,
+                    primaryYahooSplits: primaryResources.primaryYahooSplits,
+                    primaryYahooFinancials: primaryResources.primaryYahooFinancials,
+                    primaryFinraCandles: primaryResources.primaryFinraCandles,
+                    primaryFinraTimeframe: primaryResources.primaryFinraTimeframe,
+                    sharedFinraCache,
+                    sharedLowerTfCandleCache,
+                });
+                return {
+                    script,
+                    result,
+                };
+            }),
+        );
+
+        const visibleCandles = market.candles.slice(-target.limit);
+        const multiScript = analyses.length > 1;
+        const mergedSeries = trimSeriesToVisibleWindow(
+            visibleCandles,
+            analyses.flatMap(({ script, result }) => prefixSeries(result.series, script.label, multiScript)),
+        );
+        const mergedLines = trimLinesToVisibleWindow(
+            visibleCandles,
+            market.candles.length,
+            analyses.flatMap(({ result }) => result.lines),
+        );
+        const mergedMarkers = trimMarkersToVisibleWindow(
+            visibleCandles,
+            analyses.flatMap(({ script, result }) => prefixMarkers(result.markers, script.label, multiScript)),
+        );
+        const warnings = [
+            ...primaryResources.warnings,
+            ...analyses.flatMap(({ script, result }) => result.warnings.map((warning) => `${script.label}: ${warning}`)),
+        ];
+
+        await fs.mkdir(outDir, { recursive: true });
+
+        const datasetPath = path.join(outDir, 'dataset.json');
+        const csvPath = path.join(outDir, 'dataset.csv');
+        const pngPath = path.join(outDir, 'chart.png');
+        const codePath = path.join(outDir, 'indicator.pine');
+        const metaPath = path.join(outDir, 'meta.json');
+        const latestPath = path.join(outDir, 'latest.json');
+        const needsTabularRows = selectedOutputs.has('dataset') || selectedOutputs.has('csv');
+        const rows = needsTabularRows ? alignRows(visibleCandles, mergedSeries).rows : [];
+        const needsPng = selectedOutputs.has('png');
+        const pngBytes = needsPng
+            ? (() => {
+                  const svgMarkup = renderSvg(market.symbol, market.timeframe, visibleCandles, mergedSeries, mergedLines, mergedMarkers);
+                  const resvg = new Resvg(svgMarkup, {
+                      fitTo: {
+                          mode: 'width',
+                          value: DEFAULT_RENDER_WIDTH,
+                      },
+                      font: {
+                          loadSystemFonts: true,
+                      },
+                  });
+                  return resvg.render().asPng();
+              })()
+            : null;
+        const combinedCode = analyses
+            .map(({ script }) => `// ${script.kind}:${script.id}\n${script.code.trim()}`)
+            .join('\n\n');
+        const latestSeries = Object.fromEntries(
+            mergedSeries.map((item) => [item.title, getLatestFiniteSeriesValue(item)]),
+        );
+        const recentWindow = buildRecentWindow(visibleCandles, mergedSeries);
+
+        const writes: Promise<unknown>[] = [];
+
+        if (selectedOutputs.has('dataset')) {
+            writes.push(
+                fs.writeFile(
+                    datasetPath,
+                    JSON.stringify(
+                        {
+                            source: market.source,
+                            symbol: market.symbol,
+                            timeframe: market.timeframe,
+                            limit: target.limit,
+                            candles: visibleCandles,
+                            series: mergedSeries,
+                            lines: mergedLines,
+                            markers: mergedMarkers,
+                            warnings,
+                            scripts: analyses.map(({ script }) => ({
+                                kind: script.kind,
+                                id: script.id,
+                                label: script.label,
+                            })),
+                            profile: resolved.profile
+                                ? {
+                                      id: resolved.profile.id,
+                                      label: resolved.profile.label,
+                                  }
+                                : null,
+                        },
+                        null,
+                        2,
+                    ),
+                ),
+            );
+        }
+
+        if (selectedOutputs.has('csv')) {
+            writes.push(fs.writeFile(csvPath, rowsToCsv(rows)));
+        }
+
+        if (selectedOutputs.has('png') && pngBytes) {
+            writes.push(fs.writeFile(pngPath, pngBytes));
+        }
+
+        if (selectedOutputs.has('indicator')) {
+            writes.push(fs.writeFile(codePath, combinedCode + '\n'));
+        }
+
+        if (selectedOutputs.has('meta')) {
+            writes.push(
+                fs.writeFile(
+                    metaPath,
+                    JSON.stringify(
+                        {
+                            source: market.source,
+                            symbol: market.symbol,
+                            timeframe: market.timeframe,
+                            bars: visibleCandles.length,
+                            series: mergedSeries.map((item) => ({
+                                title: item.title,
+                                pane: item.pane,
+                                style: item.style,
+                            })),
+                            lines: mergedLines.map((item) => ({
+                                id: item.id,
+                                style: item.style,
+                                width: item.width,
+                                color: item.color,
+                            })),
+                            markers: mergedMarkers.map((item) => ({
+                                id: item.id,
+                                title: item.title,
+                                pane: item.pane,
+                                shape: item.shape,
+                                location: item.location,
+                                color: item.color,
+                            })),
+                            scripts: analyses.map(({ script }) => ({
+                                kind: script.kind,
+                                id: script.id,
+                                label: script.label,
+                            })),
+                            profile: resolved.profile
+                                ? {
+                                      id: resolved.profile.id,
+                                      label: resolved.profile.label,
+                                  }
+                                : null,
+                            warnings,
+                        },
+                        null,
+                        2,
+                    ),
+                ),
+            );
+        }
+
+        if (selectedOutputs.has('latest')) {
+            writes.push(
+                fs.writeFile(
+                    latestPath,
+                    JSON.stringify(
+                        {
+                            source: market.source,
+                            symbol: market.symbol,
+                            timeframe: market.timeframe,
+                            latestSeries,
+                            recentWindow,
+                            warnings,
+                            profile: resolved.profile
+                                ? {
+                                      id: resolved.profile.id,
+                                      label: resolved.profile.label,
+                                  }
+                                : null,
+                        },
+                        null,
+                        2,
+                    ),
+                ),
+            );
+        }
+
+        await Promise.all(writes);
+
+        return {
+            outDir,
+            outputs: [...selectedOutputs],
+            datasetPath: selectedOutputs.has('dataset') ? datasetPath : null,
+            csvPath: selectedOutputs.has('csv') ? csvPath : null,
+            pngPath: selectedOutputs.has('png') ? pngPath : null,
+            codePath: selectedOutputs.has('indicator') ? codePath : null,
+            metaPath: selectedOutputs.has('meta') ? metaPath : null,
+            latestPath: selectedOutputs.has('latest') ? latestPath : null,
+            latestSeries,
+            bars: visibleCandles.length,
+            series: mergedSeries.map((item) => item.title),
+            scripts: analyses.map(({ script }) => script.id),
+            profile: resolved.profile?.id ?? null,
+            symbol: market.symbol,
+            timeframe: market.timeframe,
+            source: market.source,
+        };
+    };
+
+    const isBatchMode = Boolean(args.symbols || args.timeframes || args.outRoot);
+    if (!isBatchMode) {
+        const resolved = await resolveScripts(baseDir, args);
+        const target = resolveRenderTarget(args, resolved.profile?.defaults);
+        const summary = await renderSingle({
+            resolved,
+            target,
+            outDir: path.resolve(args.outDir),
+        });
+        console.log(JSON.stringify(summary, null, 2));
+        return;
+    }
+
+    invariant(!args.codeFile || !args.outRoot || !!args.symbols || !!args.timeframes, 'Batch render with --code-file requires explicit batch targets.');
+    const symbols = parseCsvList(args.symbols ?? args.symbol);
+    const timeframes = parseCsvList(args.timeframes ?? args.timeframe).map((item) => item.toUpperCase());
+    invariant(symbols.length > 0, 'Batch render requires at least one symbol via --symbols or --symbol.');
+    invariant(timeframes.length > 0, 'Batch render requires at least one timeframe via --timeframes or --timeframe.');
+
+    const outRoot = path.resolve(args.outRoot ?? args.outDir);
+    await fs.mkdir(outRoot, { recursive: true });
+
+    const explicitSelection = hasExplicitScriptSelection(args);
+    const selectionCache = new Map<string, Promise<ResolvedScripts>>();
+    const getResolvedSelection = (timeframe: string) => {
+        const cacheKey = explicitSelection ? 'explicit-selection' : `timeframe:${timeframe}`;
+        const cached = selectionCache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        const nextArgs = explicitSelection ? args : { ...args, profile: resolveTimeframeProfile(timeframe) };
+        const promise = resolveScripts(baseDir, nextArgs);
+        selectionCache.set(cacheKey, promise);
+        return promise;
+    };
+
+    const jobs: BatchJob[] = [];
+    for (const symbol of symbols) {
+        for (const timeframe of timeframes) {
+            const resolved = await getResolvedSelection(timeframe);
+            const target = resolveRenderTarget(
+                {
+                    ...args,
+                    symbol,
+                    timeframe,
+                },
+                resolved.profile?.defaults,
+            );
+            jobs.push({
+                symbol,
+                timeframe,
+                outDir: path.join(outRoot, sanitizeOutputSegment(symbol), timeframe),
+                resolved,
+                target,
             });
+        }
+    }
+
+    const concurrency = Math.max(1, args.concurrency ?? 4);
+    const entries = await mapWithConcurrency(jobs, concurrency, async (job) => {
+        try {
+            const summary = await renderSingle(job);
             return {
-                script,
-                result,
+                status: 'ok' as const,
+                ...summary,
             };
-        }),
-    );
-
-    const visibleCandles = market.candles.slice(-target.limit);
-    const multiScript = analyses.length > 1;
-    const mergedSeries = trimSeriesToVisibleWindow(
-        visibleCandles,
-        analyses.flatMap(({ script, result }) => prefixSeries(result.series, script.label, multiScript)),
-    );
-    const mergedLines = trimLinesToVisibleWindow(
-        visibleCandles,
-        market.candles.length,
-        analyses.flatMap(({ result }) => result.lines),
-    );
-    const mergedMarkers = trimMarkersToVisibleWindow(
-        visibleCandles,
-        analyses.flatMap(({ script, result }) => prefixMarkers(result.markers, script.label, multiScript)),
-    );
-    const warnings = analyses.flatMap(({ script, result }) => result.warnings.map((warning) => `${script.label}: ${warning}`));
-
-    const outDir = path.resolve(args.outDir);
-    await fs.mkdir(outDir, { recursive: true });
-
-    const { rows } = alignRows(visibleCandles, mergedSeries);
-    const datasetPath = path.join(outDir, 'dataset.json');
-    const csvPath = path.join(outDir, 'dataset.csv');
-    const pngPath = path.join(outDir, 'chart.png');
-    const codePath = path.join(outDir, 'indicator.pine');
-    const metaPath = path.join(outDir, 'meta.json');
-    const svgMarkup = renderSvg(market.symbol, market.timeframe, visibleCandles, mergedSeries, mergedLines, mergedMarkers);
-    const resvg = new Resvg(svgMarkup, {
-        fitTo: {
-            mode: 'width',
-            value: 1600,
-        },
+        } catch (error) {
+            return {
+                status: 'error' as const,
+                symbol: job.symbol,
+                timeframe: job.timeframe,
+                outDir: job.outDir,
+                profile: job.resolved.profile?.id ?? null,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
     });
-    const pngData = resvg.render();
-    const combinedCode = analyses
-        .map(({ script }) => `// ${script.kind}:${script.id}\n${script.code.trim()}`)
-        .join('\n\n');
 
-    await Promise.all([
-        fs.writeFile(
-            datasetPath,
-            JSON.stringify(
-                {
-                    source: market.source,
-                    symbol: market.symbol,
-                    timeframe: market.timeframe,
-                    limit: target.limit,
-                    candles: visibleCandles,
-                    series: mergedSeries,
-                    lines: mergedLines,
-                    markers: mergedMarkers,
-                    warnings,
-                    scripts: analyses.map(({ script }) => ({
-                        kind: script.kind,
-                        id: script.id,
-                        label: script.label,
-                    })),
-                    profile: resolved.profile
-                        ? {
-                              id: resolved.profile.id,
-                              label: resolved.profile.label,
-                          }
-                        : null,
-                },
-                null,
-                2,
-            ),
-        ),
-        fs.writeFile(csvPath, rowsToCsv(rows)),
-        fs.writeFile(pngPath, pngData.asPng()),
-        fs.writeFile(codePath, combinedCode + '\n'),
-        fs.writeFile(
-            metaPath,
-            JSON.stringify(
-                {
-                    source: market.source,
-                    symbol: market.symbol,
-                    timeframe: market.timeframe,
-                    bars: visibleCandles.length,
-                    series: mergedSeries.map((item) => ({
-                        title: item.title,
-                        pane: item.pane,
-                        style: item.style,
-                    })),
-                    lines: mergedLines.map((item) => ({
-                        id: item.id,
-                        style: item.style,
-                        width: item.width,
-                        color: item.color,
-                    })),
-                    markers: mergedMarkers.map((item) => ({
-                        id: item.id,
-                        title: item.title,
-                        pane: item.pane,
-                        shape: item.shape,
-                        location: item.location,
-                        color: item.color,
-                    })),
-                    scripts: analyses.map(({ script }) => ({
-                        kind: script.kind,
-                        id: script.id,
-                        label: script.label,
-                    })),
-                    profile: resolved.profile
-                        ? {
-                              id: resolved.profile.id,
-                              label: resolved.profile.label,
-                          }
-                        : null,
-                    warnings,
-                },
-                null,
-                2,
-            ),
-        ),
-    ]);
+    const manifestPath = path.join(outRoot, 'manifest.json');
+    const manifest = {
+        source: args.source ?? 'yahoo',
+        outputs: [...selectedOutputs],
+        concurrency,
+        symbols,
+        timeframes,
+        entries,
+        summary: {
+            total: entries.length,
+            succeeded: entries.filter((entry) => entry.status === 'ok').length,
+            failed: entries.filter((entry) => entry.status === 'error').length,
+        },
+    };
+    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+
+    const failures = entries.filter((entry) => entry.status === 'error');
+    if (failures.length > 0) {
+        throw new Error(
+            `Batch render failed for ${failures.length}/${entries.length} jobs. First failure: ${failures[0].symbol} ${failures[0].timeframe} - ${failures[0].error}`,
+        );
+    }
 
     console.log(
         JSON.stringify(
             {
-                outDir,
-                datasetPath,
-                csvPath,
-                pngPath,
-                metaPath,
-                bars: visibleCandles.length,
-                series: mergedSeries.map((item) => item.title),
-                scripts: analyses.map(({ script }) => script.id),
-                profile: resolved.profile?.id ?? null,
+                manifestPath,
+                ...manifest.summary,
             },
             null,
             2,
@@ -925,7 +1416,10 @@ async function main() {
     );
 }
 
-main().catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
-    process.exit(1);
-});
+const entrypointHref = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;
+if (entrypointHref === import.meta.url) {
+    main().catch((error) => {
+        console.error(error instanceof Error ? error.message : error);
+        process.exit(1);
+    });
+}

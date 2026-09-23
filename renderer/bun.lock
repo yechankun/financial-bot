@@ -6,7 +6,7 @@
       "name": "druckenmiller-market-research-renderer",
       "dependencies": {
         "@resvg/resvg-js": "^2.6.2",
-        "pinets": "^0.9.8",
+        "pinets": "0.9.12",
       },
       "devDependencies": {
         "tsx": "^4.21.0",
@@ -104,7 +104,7 @@
 
     "get-tsconfig": ["get-tsconfig@4.13.7", "", { "dependencies": { "resolve-pkg-maps": "^1.0.0" } }, "sha512-7tN6rFgBlMgpBML5j8typ92BKFi2sFQvIdpAqLA2beia5avZDrMs0FLZiM5etShWq5irVyGcGMEA1jcDaK7A/Q=="],
 
-    "pinets": ["pinets@0.9.9", "", { "dependencies": { "acorn": "^8.14.0", "acorn-walk": "^8.3.4", "astring": "^1.9.0" } }, "sha512-gScPbcdhsNuR03fO6w70cinhIy26xBPzVoReM4AVRbenK3on1kCU3N/yfolqTd4NPRCcEc1MTxhbpmsw0WzRMw=="],
+    "pinets": ["pinets@0.9.12", "", { "dependencies": { "acorn": "^8.14.0", "acorn-walk": "^8.3.4", "astring": "^1.9.0" } }, "sha512-onJzMj6wVWMzR3yfOWMi1tXQpx2Cr6dYn8uq9CtbagK8UZjDo26qmZLC6U1dpIVS1n6wuAbdIidssbXyAhUU1g=="],
 
     "resolve-pkg-maps": ["resolve-pkg-maps@1.0.0", "", {}, "sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw=="],
 

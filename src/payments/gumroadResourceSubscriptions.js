@@ -17,6 +17,9 @@ function normalizeResourceName(value) {
 }
 
 function buildCallbackUrl(resourceName) {
+  if (!config.gumroadPingSecret) {
+    throw new Error("GUMROAD_PING_SECRET is required for payment callback registration.");
+  }
   const baseUrl = String(config.gumroadPublicBaseUrl || "").trim().replace(/\/+$/, "");
   if (!baseUrl) {
     return "";

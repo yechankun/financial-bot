@@ -1,0 +1,6 @@
+//@version=6
+indicator("RSI", overlay=false)
+r = ta.rsi(close, 14)
+plot(r, "RSI", color=color.aqua)
+plot(70, "Overbought", color=color.red)
+plot(30, "Oversold", color=color.lime)

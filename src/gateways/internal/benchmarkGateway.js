@@ -44,11 +44,77 @@ async function updateBenchmarkDiscordMessage(client, item, benchmarkMessage) {
   }
 }
 
+async function planAffordableBenchmarkActions(actions) {
+  const plannedActions = [];
+  const skippedActions = [];
+  const snapshot = await internalBenchmarkStore.loadBenchmarkSnapshot();
+  const portfolio = snapshot?.portfolio || {};
+  let simulatedCash = Number(portfolio.cash_balance || 0);
+  const buyFeeRate = Number(portfolio.buy_fee_rate || 0);
+  const sellFeeRate = Number(portfolio.sell_fee_rate || 0);
+  const simulatedPositions = new Map(
+    (Array.isArray(portfolio.positions) ? portfolio.positions : []).map((position) => [
+      String(position?.symbol || "").trim().toUpperCase(),
+      Number(position?.quantity || 0),
+    ]),
+  );
+
+  for (const action of Array.isArray(actions) ? actions : []) {
+    const symbol = String(action?.symbol || "").trim().toUpperCase();
+    const side = String(action?.side || "").trim().toLowerCase();
+    const quantity = Number(action?.quantity || 0);
+    const price = Number(action?.price || 0);
+    if (!symbol || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price <= 0) {
+      plannedActions.push(action);
+      continue;
+    }
+
+    if (side === "sell") {
+      const heldQuantity = Number(simulatedPositions.get(symbol) || 0);
+      if (heldQuantity >= quantity) {
+        const grossAmount = quantity * price;
+        const feeAmount = grossAmount * sellFeeRate;
+        simulatedCash += grossAmount - feeAmount;
+        simulatedPositions.set(symbol, heldQuantity - quantity);
+      }
+      plannedActions.push(action);
+      continue;
+    }
+
+    if (side !== "buy") {
+      plannedActions.push(action);
+      continue;
+    }
+
+    const totalRequired = quantity * price * (1 + buyFeeRate);
+    if (simulatedCash + 1e-9 < totalRequired) {
+      skippedActions.push({
+        action,
+        error: "계획 단계 잔고 기준으로 소화할 수 없는 매수 주문이라 제외했다냥.",
+      });
+      continue;
+    }
+
+    simulatedCash -= totalRequired;
+    simulatedPositions.set(symbol, Number(simulatedPositions.get(symbol) || 0) + quantity);
+    plannedActions.push(action);
+  }
+
+  return {
+    plannedActions,
+    skippedActions,
+  };
+}
+
 export async function executeBenchmarkActions(actions) {
   const executedTrades = [];
-  const skippedActions = [];
+  const {
+    plannedActions,
+    skippedActions: preSkippedActions,
+  } = await planAffordableBenchmarkActions(actions);
+  const skippedActions = [...preSkippedActions];
 
-  for (const action of actions) {
+  for (const action of plannedActions) {
     try {
       const result = await internalBenchmarkStore.applyBenchmarkTrade(action);
       executedTrades.push(result.trade);

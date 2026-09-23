@@ -1,0 +1,78 @@
+//@version=6
+indicator("Financial Returns Composite", "Financial Returns", overlay=false, max_lines_count=500, format=format.percent, precision=2)
+
+period = input.string("FQ", "Period (applies to ALL)", options=["FQ", "FH", "FY"], group="Common")
+
+showROA = input.bool(true, "Show ROA", group="Visibility")
+showROE = input.bool(true, "Show ROE", group="Visibility")
+showROTE = input.bool(true, "Show ROTE (Tangible ROE)", group="Visibility")
+
+applySmooth = input.bool(false, "Apply smoothing to ALL series", group="Smoothing (Global)")
+smoothType = input.string("EMA", "Smoothing type", options=["EMA", "SMA"], group="Smoothing (Global)")
+smoothLen = input.int(3, "Smoothing length", minval=1, group="Smoothing (Global)")
+
+maType = input.string("SMA", "MA type", options=["SMA", "EMA"], group="Moving Averages (Global)")
+showShortMA = input.bool(false, "Show short MA", group="Moving Averages (Global)")
+shortLen = input.int(20, "Short MA length", minval=1, group="Moving Averages (Global)")
+showLongMA = input.bool(false, "Show long MA", group="Moving Averages (Global)")
+longLen = input.int(100, "Long MA length", minval=1, group="Moving Averages (Global)")
+
+cROA = input.color(color.rgb(70, 180, 120), "ROA", group="Theme Colors")
+cROE = input.color(color.rgb(160, 90, 220), "ROE", group="Theme Colors")
+cROTE = input.color(color.rgb(230, 80, 90), "ROTE", group="Theme Colors")
+
+f_fin(finId) =>
+    request.financial(syminfo.tickerid, finId, period, barmerge.gaps_off, true)
+
+f_ma(src, len) =>
+    maType == "EMA" ? ta.ema(src, len) : ta.sma(src, len)
+
+f_smooth(x) =>
+    applySmooth ? (smoothType == "EMA" ? ta.ema(x, smoothLen) : ta.sma(x, smoothLen)) : x
+
+f_clamp255(v) =>
+    math.min(255.0, math.max(0.0, v))
+
+f_lerp(a, b, t) =>
+    a + (b - a) * t
+
+f_blend(a, b, t) =>
+    r = f_lerp(color.r(a), color.r(b), t)
+    g = f_lerp(color.g(a), color.g(b), t)
+    bl = f_lerp(color.b(a), color.b(b), t)
+    color.rgb(int(math.round(f_clamp255(r))), int(math.round(f_clamp255(g))), int(math.round(f_clamp255(bl))), 0)
+
+shortMAColor(base) =>
+    f_blend(base, color.white, 0.22)
+
+longMAColor(base) =>
+    f_blend(base, color.black, 0.22)
+
+mainStyle = applySmooth ? plot.style_line : plot.style_stepline
+
+roaRaw = f_fin("RETURN_ON_ASSETS")
+roeRaw = f_fin("RETURN_ON_EQUITY")
+roteRaw = f_fin("RETURN_ON_TANG_EQUITY")
+
+roa = f_smooth(roaRaw)
+roe = f_smooth(roeRaw)
+rote = f_smooth(roteRaw)
+
+roaS = f_ma(roa, shortLen)
+roaL = f_ma(roa, longLen)
+roeS = f_ma(roe, shortLen)
+roeL = f_ma(roe, longLen)
+roteS = f_ma(rote, shortLen)
+roteL = f_ma(rote, longLen)
+
+plot(showROA ? roa : na, "ROA", cROA, linewidth=2, style=mainStyle)
+plot(showROA and showShortMA ? roaS : na, "ROA — Short MA", shortMAColor(cROA), linewidth=1)
+plot(showROA and showLongMA ? roaL : na, "ROA — Long MA", longMAColor(cROA), linewidth=1)
+
+plot(showROE ? roe : na, "ROE", cROE, linewidth=2, style=mainStyle)
+plot(showROE and showShortMA ? roeS : na, "ROE — Short MA", shortMAColor(cROE), linewidth=1)
+plot(showROE and showLongMA ? roeL : na, "ROE — Long MA", longMAColor(cROE), linewidth=1)
+
+plot(showROTE ? rote : na, "ROTE", cROTE, linewidth=2, style=mainStyle)
+plot(showROTE and showShortMA ? roteS : na, "ROTE — Short MA", shortMAColor(cROTE), linewidth=1)
+plot(showROTE and showLongMA ? roteL : na, "ROTE — Long MA", longMAColor(cROTE), linewidth=1)

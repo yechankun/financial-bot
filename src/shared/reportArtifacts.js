@@ -84,6 +84,26 @@ export function buildResearchArtifactPaths(runDir) {
       "market",
       "candidate_tickers.json",
     ),
+    marketScreenerCandidatesJsonPath: path.join(
+      producerRoot,
+      "market",
+      "investment_candidate_context.json",
+    ),
+    researchCandidatesJsonPath: path.join(
+      producerRoot,
+      "market",
+      "research_candidates.json",
+    ),
+    decisionCandidatesJsonPath: path.join(
+      producerRoot,
+      "market",
+      "decision_candidates.json",
+    ),
+    decisionPriorMarkdownPath: path.join(
+      producerRoot,
+      "market",
+      "decision_prior.md",
+    ),
     stockLookupRowsJsonPath: path.join(
       producerRoot,
       "market",

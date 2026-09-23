@@ -60,7 +60,7 @@ function normalizeResearchStep(progress) {
     return {
       activeStepIndex: 3,
       totalSteps: 3,
-      activeStepText: "최종 확인용 차트를 읽어 crowding과 타이밍을 점검하고 있다",
+      activeStepText: "최종 확인용 차트를 읽어 과열 여부와 현재 위치를 점검하고 있다",
     };
   }
 
@@ -93,9 +93,11 @@ export function buildProgressMessage(progress) {
   const skillLabel = progress.skillName || "선택한";
   const base =
     progress.phase === "producer"
-      ? "거시경제/기술/재무차트 자료를 수집하고 있다냥."
+      ? "정책조사와 후보조사를 병렬로 진행하고 있다냥."
       : progress.phase === "report"
         ? "최종 보고서를 렌더링중이다냥."
+        : progress.phase === "decision"
+          ? "드러켄밀러식 판단을 정리하고 있다냥."
         : progress.phase === "research"
           ? `${skillLabel} 스킬로 산출물을 해석하고 있다냥.`
         : `${skillLabel} 스킬을 써서 리포트를 준비한다냥.`;

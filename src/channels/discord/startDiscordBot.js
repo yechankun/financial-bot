@@ -24,12 +24,22 @@ import {
 import { registerSlashCommands } from "./commands/registerSlashCommands.js";
 import { createInteractionHandler } from "./handlers/createInteractionHandler.js";
 
+let activeDiscordClient = null;
+
+export function getDiscordClient() {
+  return activeDiscordClient;
+}
+
 export async function startDiscordBot() {
   if (!shouldStartDiscordIngress()) {
     console.log(
       "discord-ingress capability is disabled. Skipping Discord login for this process.",
     );
     return;
+  }
+
+  if (!config.discordToken || !config.applicationId) {
+    throw new Error("Discord ingress requires DISCORD_BOT_TOKEN and DISCORD_APPLICATION_ID.");
   }
 
   const internalAvailable = hasInternalProvider();
@@ -53,6 +63,7 @@ export async function startDiscordBot() {
   const client = new Client({
     intents: [GatewayIntentBits.Guilds],
   });
+  activeDiscordClient = client;
 
   const activeChannelRuns = new Map();
   const consumeBenchmarkQueueBatch = benchmarkRuntimeEnabled
@@ -90,4 +101,5 @@ export async function startDiscordBot() {
 
   client.on("interactionCreate", handleInteraction);
   await client.login(config.discordToken);
+  return client;
 }

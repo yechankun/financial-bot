@@ -1,0 +1,114 @@
+//@version=6
+indicator("Short Volume Profile (Date Range)", overlay=true, max_lines_count=500)
+
+row = input.int(70, "Row Size", minval=10, maxval=500)
+show_rpoc = input.bool(false, "Show Rolling POC")
+start_time = input.time(timestamp("01 Jan 2024 00:00 +0900"), "Start Time")
+end_time_input = input.time(timestamp("31 Dec 2026 23:59 +0900"), "End Time")
+use_now_as_end = input.bool(true, "Use Now as End")
+effective_end = use_now_as_end ? time : end_time_input
+max_range_scan = input.int(3000, "Max Range Scan Bars", minval=200, maxval=10000)
+
+width = input.int(50, "Width (% of the box)", minval=1, maxval=100)
+bar_width = input.int(2, "Bar Width", minval=1, maxval=10)
+flip = input.bool(false, "Flip Histogram")
+solid = input.color(#2157f3, "Rows Solid Color")
+poc_color = input.color(#ff5d00, "POC Color")
+v_option = input.string("Close * Short Volume", "Source", options=["Short Volume", "Close * Short Volume"])
+
+short_ticker = "FINRA:" + syminfo.ticker + "_SHORT_VOLUME"
+sv_tf = request.security(short_ticker, timeframe.period, close)
+profile_value = v_option == "Short Volume" ? sv_tf : sv_tf * close
+barDurMs = timeframe.in_seconds(timeframe.period) * 1000
+
+var a = array.new_line()
+var b = array.new_line()
+if barstate.isfirst
+    for i = 0 to row - 1
+        array.push(a, line.new(na, na, na, na, width=bar_width))
+    array.push(b, line.new(na, na, na, na, width=bar_width))
+
+f_range_span_and_hilo(int maxBars) =>
+    int scan = math.min(maxBars, 10000)
+    int oldestOff = na
+    int newestOff = na
+    int cnt = 0
+    float hi = na
+    float lo = na
+    for k = 0 to scan - 1
+        bool inR = (time[k] <= effective_end) and (time[k] + barDurMs > start_time)
+        if inR
+            cnt += 1
+            oldestOff := na(oldestOff) ? k : math.max(oldestOff, k)
+            newestOff := na(newestOff) ? k : math.min(newestOff, k)
+            hi := na(hi) ? high[k] : math.max(hi, high[k])
+            lo := na(lo) ? low[k] : math.min(lo, low[k])
+    [oldestOff, newestOff, cnt, hi, lo]
+
+var levels = array.new_float()
+var sumv = array.new_float()
+var float Alvl = 0.0
+var float Blvl = 0.0
+
+line l = na
+line poc = na
+
+condition = show_rpoc ? true : barstate.islast
+if condition
+    [oldOff, newOff, cnt, hiR, loR] = f_range_span_and_hilo(max_range_scan)
+
+    if cnt > 0 and not na(oldOff) and not na(newOff) and not na(hiR) and not na(loR) and hiR > loR
+        int spanBars = oldOff - newOff + 1
+        int anchorX = bar_index - newOff
+
+        array.clear(levels)
+        array.clear(sumv)
+
+        for i = 0 to row
+            array.push(levels, loR + i / row * (hiR - loR))
+
+        for j = 0 to row - 1
+            float sum = 0.0
+            for k = 0 to spanBars - 1
+                int off = newOff + k
+                bool barInRange = (time[off] <= effective_end) and (time[off] + barDurMs > start_time)
+                if barInRange and high[off] > array.get(levels, j) and low[off] < array.get(levels, j + 1)
+                    sum += nz(profile_value[off])
+            array.push(sumv, sum)
+
+        float maxSum = array.max(sumv)
+
+        for j = 0 to row - 1
+            float mult = maxSum != 0.0 ? array.get(sumv, j) / maxSum : 0.0
+            l := array.get(a, j)
+            float get = array.get(levels, j)
+
+            if flip
+                line.set_xy1(l, anchorX, get)
+                line.set_xy2(l, anchorX - math.round(spanBars * width / 100 * mult), get)
+            else
+                line.set_xy1(l, anchorX - spanBars + 1, get)
+                line.set_xy2(l, anchorX - spanBars + 1 + math.round(spanBars * width / 100 * mult), get)
+
+            line.set_color(l, solid)
+            line.set_width(l, bar_width)
+
+            if mult == 1
+                poc := array.get(b, 0)
+                float avg = math.avg(get, array.get(levels, j + 1))
+                if flip
+                    line.set_xy1(poc, anchorX, avg)
+                    line.set_xy2(poc, anchorX - spanBars + 1, avg)
+                else
+                    line.set_xy1(poc, anchorX - spanBars + 1, avg)
+                    line.set_xy2(poc, anchorX, avg)
+                line.set_color(poc, poc_color)
+                line.set_style(poc, line.style_dotted)
+                line.set_width(poc, bar_width)
+
+        if show_rpoc
+            int pocIndex = array.indexof(sumv, maxSum)
+            Alvl := array.get(levels, pocIndex)
+            Blvl := array.get(levels, pocIndex + 1)
+
+plot(show_rpoc ? math.avg(Alvl, Blvl) : na, "Rolling POC", color=#ff1100)

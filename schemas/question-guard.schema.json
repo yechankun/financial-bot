@@ -3,7 +3,11 @@
   "additionalProperties": false,
   "required": [
     "allow",
-    "reason"
+    "reason",
+    "scope_mode",
+    "target_symbols",
+    "target_company_queries",
+    "target_industries"
   ],
   "properties": {
     "allow": {
@@ -11,6 +15,31 @@
     },
     "reason": {
       "type": "string"
+    },
+    "scope_mode": {
+      "type": "string",
+      "enum": [
+        "broad",
+        "targeted"
+      ]
+    },
+    "target_symbols": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target_company_queries": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target_industries": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   }
 }

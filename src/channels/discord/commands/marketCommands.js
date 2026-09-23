@@ -19,8 +19,8 @@ export function buildEtfScreenCommandJson() {
               .addChoices(
                 { name: "개요", value: "overview" },
                 { name: "종합 우량", value: "composite" },
-                { name: "저평가", value: "undervalued" },
-                { name: "고평가", value: "overvalued" },
+                { name: "저평가 (PER·PBR·PSR)", value: "undervalued" },
+                { name: "저평가 (PER·PBR·EV/EBITDA·P/FCF)", value: "undervalued_cashflow" },
                 { name: "이상치", value: "outlier" },
                 { name: "현금흐름 좋음", value: "cashflow_good" },
                 {
@@ -28,7 +28,13 @@ export function buildEtfScreenCommandJson() {
                   value: "cashflow_capex_deterioration",
                 },
                 { name: "모멘텀 진행", value: "momentum" },
+                { name: "모멘텀 악화", value: "momentum_deterioration" },
               ),
+          )
+          .addBooleanOption((option) =>
+            option
+              .setName("reverse")
+              .setDescription("역순으로 본다냥. 모멘텀은 완전한 반대가 아니라 약한 반대 방향 의미다냥."),
           )
           .addIntegerOption((option) =>
             option
@@ -49,8 +55,8 @@ export function buildEtfScreenCommandJson() {
             .setDescription("비우면 전체 JSON, 고르면 개별 카테고리다냥.")
             .addChoices(
               { name: "종합 우량", value: "composite" },
-              { name: "저평가", value: "undervalued" },
-              { name: "고평가", value: "overvalued" },
+              { name: "저평가 (PER·PBR·PSR)", value: "undervalued" },
+              { name: "저평가 (PER·PBR·EV/EBITDA·P/FCF)", value: "undervalued_cashflow" },
               { name: "이상치", value: "outlier" },
               { name: "현금흐름 좋음", value: "cashflow_good" },
               {
@@ -58,6 +64,7 @@ export function buildEtfScreenCommandJson() {
                 value: "cashflow_capex_deterioration",
               },
               { name: "모멘텀 진행", value: "momentum" },
+              { name: "모멘텀 악화", value: "momentum_deterioration" },
             ),
         )
         .addBooleanOption((option) =>
@@ -125,9 +132,11 @@ export function buildStockScreenCommandJson() {
                 { name: "개요", value: "overview" },
                 { name: "종합 우량", value: "composite" },
                 { name: "ETF 포함 수", value: "etf_included_count" },
-                { name: "ETF 보유 총규모", value: "etf_total_exposure" },
-                { name: "저평가", value: "undervalued" },
-                { name: "고평가", value: "overvalued" },
+                { name: "시가총액 대비 ETF 보유금액 총규모", value: "etf_total_exposure" },
+                { name: "시가총액 대비 ETF 유입금액 1개월", value: "etf_fund_flow_to_market_cap_1m" },
+                { name: "시가총액 대비 ETF 유입금액 3개월", value: "etf_fund_flow_to_market_cap_3m" },
+                { name: "저평가 (PER·PBR·EV/EBITDA·P/FCF)", value: "undervalued" },
+                { name: "저평가 (PER·PBR·PSR)", value: "undervalued_psr" },
                 { name: "이상치", value: "outlier" },
                 { name: "현금흐름 좋음", value: "cashflow_good" },
                 {
@@ -135,7 +144,13 @@ export function buildStockScreenCommandJson() {
                   value: "cashflow_capex_deterioration",
                 },
                 { name: "모멘텀 진행", value: "momentum" },
+                { name: "모멘텀 악화", value: "momentum_deterioration" },
               ),
+          )
+          .addBooleanOption((option) =>
+            option
+              .setName("reverse")
+              .setDescription("역순으로 본다냥. 모멘텀은 완전한 반대가 아니라 약한 반대 방향 의미다냥."),
           )
           .addIntegerOption((option) =>
             option
@@ -172,9 +187,11 @@ export function buildStockScreenCommandJson() {
                 { name: "개요", value: "overview" },
                 { name: "종합 우량", value: "composite" },
                 { name: "ETF 포함 수", value: "etf_included_count" },
-                { name: "ETF 보유 총규모", value: "etf_total_exposure" },
-                { name: "저평가", value: "undervalued" },
-                { name: "고평가", value: "overvalued" },
+                { name: "시가총액 대비 ETF 보유금액 총규모", value: "etf_total_exposure" },
+                { name: "시가총액 대비 ETF 유입금액 1개월", value: "etf_fund_flow_to_market_cap_1m" },
+                { name: "시가총액 대비 ETF 유입금액 3개월", value: "etf_fund_flow_to_market_cap_3m" },
+                { name: "저평가 (PER·PBR·EV/EBITDA·P/FCF)", value: "undervalued" },
+                { name: "저평가 (PER·PBR·PSR)", value: "undervalued_psr" },
                 { name: "이상치", value: "outlier" },
                 { name: "현금흐름 좋음", value: "cashflow_good" },
                 {
@@ -182,7 +199,13 @@ export function buildStockScreenCommandJson() {
                   value: "cashflow_capex_deterioration",
                 },
                 { name: "모멘텀 진행", value: "momentum" },
+                { name: "모멘텀 악화", value: "momentum_deterioration" },
               ),
+          )
+          .addBooleanOption((option) =>
+            option
+              .setName("reverse")
+              .setDescription("역순으로 본다냥. 모멘텀은 완전한 반대가 아니라 약한 반대 방향 의미다냥."),
           )
           .addStringOption((option) =>
             option
@@ -216,9 +239,11 @@ export function buildStockScreenCommandJson() {
             .addChoices(
               { name: "종합 우량", value: "composite" },
               { name: "ETF 포함 수", value: "etf_included_count" },
-              { name: "ETF 보유 총규모", value: "etf_total_exposure" },
-              { name: "저평가", value: "undervalued" },
-              { name: "고평가", value: "overvalued" },
+              { name: "시가총액 대비 ETF 보유금액 총규모", value: "etf_total_exposure" },
+              { name: "시가총액 대비 ETF 유입금액 1개월", value: "etf_fund_flow_to_market_cap_1m" },
+              { name: "시가총액 대비 ETF 유입금액 3개월", value: "etf_fund_flow_to_market_cap_3m" },
+              { name: "저평가 (PER·PBR·EV/EBITDA·P/FCF)", value: "undervalued" },
+              { name: "저평가 (PER·PBR·PSR)", value: "undervalued_psr" },
               { name: "이상치", value: "outlier" },
               { name: "현금흐름 좋음", value: "cashflow_good" },
               {
@@ -226,6 +251,7 @@ export function buildStockScreenCommandJson() {
                 value: "cashflow_capex_deterioration",
               },
               { name: "모멘텀 진행", value: "momentum" },
+              { name: "모멘텀 악화", value: "momentum_deterioration" },
             ),
         )
         .addBooleanOption((option) =>
@@ -254,9 +280,11 @@ export function buildStockScreenCommandJson() {
                 { name: "개요", value: "overview" },
                 { name: "종합 우량", value: "composite" },
                 { name: "ETF 포함 수", value: "etf_included_count" },
-                { name: "ETF 보유 총규모", value: "etf_total_exposure" },
-                { name: "저평가", value: "undervalued" },
-                { name: "고평가", value: "overvalued" },
+                { name: "시가총액 대비 ETF 보유금액 총규모", value: "etf_total_exposure" },
+                { name: "시가총액 대비 ETF 유입금액 1개월", value: "etf_fund_flow_to_market_cap_1m" },
+                { name: "시가총액 대비 ETF 유입금액 3개월", value: "etf_fund_flow_to_market_cap_3m" },
+                { name: "저평가 (PER·PBR·EV/EBITDA·P/FCF)", value: "undervalued" },
+                { name: "저평가 (PER·PBR·PSR)", value: "undervalued_psr" },
                 { name: "이상치", value: "outlier" },
                 { name: "현금흐름 좋음", value: "cashflow_good" },
                 {
@@ -264,7 +292,13 @@ export function buildStockScreenCommandJson() {
                   value: "cashflow_capex_deterioration",
                 },
                 { name: "모멘텀 진행", value: "momentum" },
+                { name: "모멘텀 악화", value: "momentum_deterioration" },
               ),
+          )
+          .addBooleanOption((option) =>
+            option
+              .setName("reverse")
+              .setDescription("역순으로 본다냥. 모멘텀은 완전한 반대가 아니라 약한 반대 방향 의미다냥."),
           )
           .addStringOption((option) =>
             option

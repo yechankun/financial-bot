@@ -17,5 +17,18 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install public dependencies
+        run: npm install --omit=optional --ignore-scripts
+
+      - name: Install renderer dependencies
+        run: npm --prefix renderer install
+
       - name: Run checks
         run: npm run check
+
+      - name: Run runtime regression tests
+        run: npm test
+
+
+      - name: Run offline collector and renderer tests
+        run: npm --prefix renderer test

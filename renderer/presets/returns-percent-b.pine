@@ -1,0 +1,22 @@
+//@version=6
+indicator("기간 수익률 %b", overlay=false)
+
+period  = input.int(70, "수익률 기간", minval=1)
+bb_len  = input.int(520, "볼린저밴드 기간", minval=1)
+bb_mult = input.float(2.0, "표준편차", step=0.1)
+
+ret = (close - close[period]) / close[period] * 100
+
+basis = ta.sma(ret, bb_len)
+dev   = ta.stdev(ret, bb_len)
+upper = basis + bb_mult * dev
+lower = basis - bb_mult * dev
+
+band_range = upper - lower
+percent_b = band_range != 0 ? (ret - lower) / band_range : na
+
+plot(percent_b, "기간 수익률 %b", color=color.new(color.aqua, 0), linewidth=2)
+
+hline(0,   "하단 밴드", color=color.blue, linestyle=hline.style_dotted)
+hline(0.5, "중심선",    color=color.gray, linestyle=hline.style_dotted)
+hline(1,   "상단 밴드", color=color.red, linestyle=hline.style_dotted)

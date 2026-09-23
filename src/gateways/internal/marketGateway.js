@@ -4,11 +4,13 @@ export async function fetchEtfScreen({
   category,
   limit,
   criteria,
+  reverse,
 }) {
   return internalMarketStorage.buildEtfScreenMessage({
     category,
     limit,
     criteria,
+    reverse,
   });
 }
 
@@ -16,6 +18,7 @@ export async function fetchStockScreen({
   category,
   limit,
   criteria,
+  reverse,
   industryHighlights,
   industryOnly,
   industries,
@@ -27,6 +30,7 @@ export async function fetchStockScreen({
     category,
     limit,
     criteria,
+    reverse,
     industryHighlights,
     industryOnly,
     industries,
@@ -50,4 +54,18 @@ export async function fetchSymbolAutocomplete({ dataset, query }) {
 
 export async function fetchIndustryAutocomplete({ query }) {
   return internalMarketStorage.buildIndustryAutocompleteChoices({ query });
+}
+
+export async function resolveReportQuestionScope({
+  scopeMode,
+  targetSymbols,
+  targetCompanyQueries,
+  targetIndustries,
+}) {
+  return internalMarketStorage.resolveReportQuestionScope({
+    scopeMode,
+    targetSymbols,
+    targetCompanyQueries,
+    targetIndustries,
+  });
 }

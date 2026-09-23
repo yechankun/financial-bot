@@ -70,6 +70,6 @@ export type IndicatorPreset = {
     id: string;
     label: string;
     description: string;
-    code: string;
+    sourcePath: string;
     warmupBars?: number;
 };

@@ -1,0 +1,4 @@
+//@version=6
+indicator("FINRA Short Volume", overlay=false)
+plot(close, "Short Volume", color=color.red, style=plot.style_columns)
+plot(ta.sma(close, 5), "SMA 5", color=color.orange)
