@@ -70,7 +70,7 @@ function isGuildTextLikeChannel(channel) {
 }
 
 function requiresInternalProvider(commandName) {
-  return commandName !== "skills";
+  return commandName !== "skills" && commandName !== "etf";
 }
 
 function ensureCommandCapability(commandName) {
@@ -85,7 +85,7 @@ function ensureCommandCapability(commandName) {
 }
 
 function shouldConsumeRateLimit(commandName) {
-  return commandName !== "skills" && commandName !== "plan";
+  return commandName !== "skills" && commandName !== "plan" && commandName !== "etf";
 }
 
 async function enforceRateLimit(interaction) {

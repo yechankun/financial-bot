@@ -84,6 +84,21 @@ test("a provider older than this runtime is reported with its missing functions"
   assert.ok(incompatibleStatus.missingApi.includes("market-data-contract-v1"));
 });
 
+test("public provider injects its chart renderer into legacy internal screener calls", async () => {
+  const legacy = path.join(testRoot, "legacy-chart-provider.mjs");
+  await fs.writeFile(legacy, [
+    "export const internalMarketStorage = {",
+    "  async generateReportScreenerArtifacts(request) {",
+    "    return { renderBatchType: typeof request.renderBatch };",
+    "  },",
+    "};",
+  ].join("\n"));
+  const code = `const m=await import(${JSON.stringify(providerUrl)}); console.log(JSON.stringify(await m.internalMarketStorage.generateReportScreenerArtifacts({})));`;
+  const child = run(code, { INTERNAL_PROVIDER_MODE: "package", INTERNAL_PROVIDER_PACKAGE: legacy });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout).renderBatchType, "function");
+});
+
 const siblingEntry = path.resolve("../financial-bot-internal/src/index.js");
 test("the sibling internal checkout satisfies the provider API contract", { skip: !existsSync(siblingEntry) && "no sibling checkout" }, () => {
   const status = JSON.parse(run(statusCode, { INTERNAL_PROVIDER_MODE: "package", INTERNAL_PROVIDER_PACKAGE: siblingEntry }).stdout);

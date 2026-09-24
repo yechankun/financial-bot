@@ -1,13 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { internalChartQueue, internalChartTool } from "./provider.js";
+import * as chartQueue from "../../charts/queue.js";
+import * as chartTool from "../../charts/renderer.js";
 
-export function createChartQueueConsumer() {
+export function createChartQueueConsumer({
+  renderCharts = chartTool.renderCandidateCharts,
+} = {}) {
   return async function consumeChartQueueBatch(batchItems) {
     for (const item of batchItems) {
       try {
-        const result = await internalChartTool.renderCandidateCharts({
+        const result = await renderCharts({
           candidateTickersJsonPath: item.candidateTickersJsonPath,
           outRoot: item.outRoot,
           timeframes: item.timeframes || ["D", "W"],
@@ -42,7 +45,7 @@ export function createChartQueueConsumer() {
 }
 
 export async function ensureChartRuntime() {
-  await internalChartQueue.ensureChartQueueDirs();
+  await chartQueue.ensureChartQueueDirs();
 }
 
 export async function produceCandidateCharts({
@@ -52,15 +55,15 @@ export async function produceCandidateCharts({
   outRoot,
   timeframes = ["D"],
 }) {
-  const chartJob = await internalChartQueue.enqueueChartJob({
+  const chartJob = await chartQueue.enqueueChartJob({
     runDir,
     candidateTickersJsonPath,
     outRoot,
     timeframes,
   });
-  await internalChartQueue.drainChartQueue(consumeChartQueueBatch);
+  await chartQueue.drainChartQueue(consumeChartQueueBatch);
 
-  const chartCompleted = await internalChartQueue.waitForChartJob(
+  const chartCompleted = await chartQueue.waitForChartJob(
     chartJob.queueId,
     15 * 60 * 1000,
   );
@@ -68,9 +71,9 @@ export async function produceCandidateCharts({
     throw new Error("후보 차트 생산 큐가 시간 안에 끝나지 못했다냥.");
   }
 
-  return internalChartTool.loadCandidateTickers(candidateTickersJsonPath);
+  return chartTool.loadCandidateTickers(candidateTickersJsonPath);
 }
 
 export async function drainPendingChartQueue(consumeChartQueueBatch) {
-  await internalChartQueue.drainChartQueue(consumeChartQueueBatch);
+  await chartQueue.drainChartQueue(consumeChartQueueBatch);
 }

@@ -86,13 +86,12 @@ export function buildEtfLookupCommandJson() {
   return addShareOption(
     new SlashCommandBuilder()
       .setName("etf")
-      .setDescription("특정 ETF의 집계 재무와 테크니컬을 보여준다냥.")
+      .setDescription("직접 수집한 ETF 구성종목·발행좌수·지수·자금흐름을 보여준다냥.")
       .addStringOption((option) =>
         option
           .setName("symbol")
-          .setDescription("자동완성: ETF명 | 추적지수")
+          .setDescription("ETF ticker, ISIN 또는 share class ID")
           .setRequired(true)
-          .setAutocomplete(true)
           .setMaxLength(64),
       ),
   ).toJSON();

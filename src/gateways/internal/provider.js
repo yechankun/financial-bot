@@ -2,6 +2,7 @@ import "dotenv/config";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { renderRendererBatch } from "../../charts/renderer.js";
 
 const requestedMode = String(
   process.env.INTERNAL_PROVIDER_MODE || "auto",
@@ -134,6 +135,16 @@ function namespaceProxy(key) {
         if (value === undefined && typeof prop === "string") {
           throw new Error(`내부 패키지 \`${resolvedSpecifier}\`에 ${key}.${prop}가 없다냥. 공개 런타임과 버전이 맞지 않는다냥.`);
         }
+        if (
+          key === "internalMarketStorage" &&
+          prop === "generateReportScreenerArtifacts" &&
+          typeof value === "function"
+        ) {
+          return (request = {}) => value({
+            ...request,
+            renderBatch: request.renderBatch || renderRendererBatch,
+          });
+        }
         return value;
       },
     },
@@ -147,11 +158,9 @@ export const REQUIRED_INTERNAL_API = {
   internalPrompts: ["buildBenchmarkTradePrompt", "buildDecisionPrompt", "buildGuardPrompt", "buildPolicySearchPrompt", "buildReportPrompt", "buildResearchPrompt"],
   internalBenchmarkStore: ["applyBenchmarkTrade", "buildBenchmarkConsumerPromptContext", "buildBenchmarkDecisionFailureMessage", "buildBenchmarkDecisionMessage", "buildBenchmarkExecutionMarkdown", "buildBenchmarkHistoryMessage", "buildBenchmarkPortfolioMessage", "buildBenchmarkPromptContext", "ensureBenchmarkFiles", "loadBenchmarkSnapshot"],
   internalBenchmarkQueue: ["drainBenchmarkQueue", "enqueueBenchmarkReport", "ensureBenchmarkQueueDirs"],
-  internalChartQueue: ["drainChartQueue", "enqueueChartJob", "ensureChartQueueDirs", "waitForChartJob"],
-  internalChartTool: ["loadCandidateTickers", "renderCandidateCharts"],
   internalCollectorRuntime: ["getCollectorStatus", "runCollectorTick"],
   internalAppStorage: ["authorizeReportAccess", "claimIdleAutoReport", "consumeCommandRateLimit", "deleteScreenPreference", "ensureAutoReportBaseline", "getGuildSubscription", "getReportAccessStatus", "getReportCache", "getUserSubscription", "ingestPaymentEvent", "issuePlanClaimCode", "loadScreenPreference", "loadScreenPreferenceBundle", "markAutoReportPosted", "putGuildSubscription", "putReportCache", "putUserSubscription", "redeemPlanLicense", "saveScreenPreference", "saveScreenPreferenceBundle", "touchUserReportRequest"],
-  internalMarketStorage: ["buildEtfLookupMessage", "buildEtfScreenMessage", "buildIndustryAutocompleteChoices", "buildStockLookupMessage", "buildStockScreenMessage", "buildSymbolAutocompleteChoices", "generateReportScreenerArtifacts", "getMarketDataCapabilities", "resolveReportQuestionScope"],
+  internalMarketStorage: ["buildEtfScreenMessage", "buildIndustryAutocompleteChoices", "buildStockLookupMessage", "buildStockScreenMessage", "buildSymbolAutocompleteChoices", "generateReportScreenerArtifacts", "getMarketDataCapabilities", "resolveReportQuestionScope"],
 };
 
 export const REQUIRED_MARKET_DATA_CONTRACT_VERSION = 1;

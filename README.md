@@ -99,7 +99,7 @@ INTERNAL_PROVIDER_PACKAGE=../financial-bot-internal/src/index.js
 
 공개 저장소는 Discord 명령 접수와 응답, 리포트 큐, 결제 웹훅, 차트와 보고서 렌더링을 담당합니다. 리서치, 시장·뉴스 데이터 수집과 저장, 벤치마크 시뮬레이션은 비공개 [financial-bot-internal](../financial-bot-internal/README.md) 패키지가 담당합니다. 공개 런타임은 `INTERNAL_PROVIDER_MODE`와 `INTERNAL_PROVIDER_PACKAGE` 설정으로 내부 엔진에 연결합니다.
 
-`/etf`와 관련 공개 명령은 요청을 처리하고 결과를 표시합니다. ETF 목록·공식 holdings·발행좌수/NAV·기준지수 수집, 이력 저장, 유입·유출 계산의 구현과 운영 CLI는 내부 저장소에 둡니다. 수집기는 `ETF_DIRECT_DATA_DIR`로 지정한 런타임 데이터 디렉터리를 사용합니다. 기존 운영 구성을 유지할 때 이 값은 공개 저장소의 `data/`를 가리킵니다. 수집 구현이 일부 공식 원천과 상품에 연결되어 있어도 전 세계 ETF 목록이나 전수 holdings·자본 시계열이 완성된 것은 아닙니다. 내부 문서의 `global_complete=false`와 source별 coverage를 완료 기준으로 확인하십시오. 공개 CLI는 내부 운영 명령을 전달하며 원천 설정 파일은 내부 저장소에서 읽습니다.
+`/etf`와 관련 공개 명령은 요청을 처리하고 결과를 표시합니다. ETF 목록·공식 holdings·발행좌수/NAV·기준지수 수집, 이력 저장, 유입·유출 계산의 구현과 운영 CLI는 내부 저장소에 둡니다. 수집기는 `ETF_DIRECT_DATA_DIR`로 지정한 런타임 데이터 디렉터리를 사용합니다. 기존 운영 구성을 유지할 때 이 값은 공개 저장소의 `data/`를 가리킵니다. 수집 구현이 일부 공식 원천과 상품에 연결되어 있어도 전 세계 ETF 목록이나 전수 holdings·자본 시계열이 완성된 것은 아닙니다. 내부 문서의 `global_complete=false`와 source별 coverage를 완료 기준으로 확인하십시오. 공개 CLI는 조회·상태 확인만 지원하며 수집 명령과 원천 설정은 내부 저장소에서 관리합니다.
 
 ```bash
 npm run etf:direct:query -- --share-class-id US:IVV:ETF --holdings-limit 5

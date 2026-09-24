@@ -140,6 +140,10 @@ export const config = {
   chartQueueProcessingDir: path.join(chartsDir, "queue", "processing"),
   chartQueueProcessedDir: path.join(chartsDir, "queue", "processed"),
   chartQueueLockDir: path.join(chartsDir, "queue", ".worker-lock"),
+  chartRenderScriptPath:
+    process.env.CHART_RENDER_SCRIPT_PATH?.trim() ||
+    path.join(repoDir, "scripts", "render_druckenmiller_stack.py"),
+  chartRenderConcurrency: Number(process.env.CHART_RENDER_CONCURRENCY || 4),
   appDbPath: path.join(dataDir, "app.sqlite3"),
   guardSchemaPath: path.join(repoDir, "schemas", "question-guard.schema.json"),
   producerSchemaPath: path.join(repoDir, "schemas", "producer-output.schema.json"),

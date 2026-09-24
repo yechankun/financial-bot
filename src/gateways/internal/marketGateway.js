@@ -1,4 +1,5 @@
 import { internalMarketStorage } from "./provider.js";
+import { fetchDirectEtfLookup } from "../local/etfGateway.js";
 
 export async function fetchEtfScreen({
   category,
@@ -41,7 +42,7 @@ export async function fetchStockScreen({
 }
 
 export async function fetchEtfLookup({ symbol }) {
-  return internalMarketStorage.buildEtfLookupMessage(symbol);
+  return fetchDirectEtfLookup({ symbol });
 }
 
 export async function fetchStockLookup({ symbol }) {

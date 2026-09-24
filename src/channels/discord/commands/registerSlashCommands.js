@@ -20,6 +20,10 @@ import { buildSkillsCommandJson } from "./skillsCommand.js";
 export function buildCommandJson(activeSkills, { internalCommandsEnabled }) {
   const commands = [buildSkillsCommandJson()];
 
+  if (canHandleLookupCommands()) {
+    commands.push(buildEtfLookupCommandJson());
+  }
+
   if (!internalCommandsEnabled) {
     return commands;
   }
@@ -29,7 +33,6 @@ export function buildCommandJson(activeSkills, { internalCommandsEnabled }) {
   if (canHandleLookupCommands()) {
     commands.push(
       buildEtfScreenCommandJson(),
-      buildEtfLookupCommandJson(),
       buildStockScreenCommandJson(),
       buildStockLookupCommandJson(),
       buildBenchmarkCommandJson(),

@@ -23,7 +23,10 @@
     "plan:admin": "node scripts/plan_admin.js",
     "gumroad:resources:sync": "node scripts/gumroad_resource_subscriptions.js",
     "provider:status": "node --input-type=module -e \"import('./src/gateways/internal/provider.js').then((m) => console.log(JSON.stringify(m.getInternalProviderStatus(), null, 2)))\"",
-    "runtime:status": "node --input-type=module -e \"import('./src/runtimeCapabilities.js').then((m) => console.log(JSON.stringify(m.getCapabilityStatus(), null, 2)))\""
+    "runtime:status": "node --input-type=module -e \"import('./src/runtimeCapabilities.js').then((m) => console.log(JSON.stringify(m.getCapabilityStatus(), null, 2)))\"",
+    "start:ingress:direct": "BOT_RUNTIME_ROLE=ingress INTERNAL_PROVIDER_MODE=disabled node src/index.js",
+    "etf:direct:query": "python3 scripts/etf_query.py query",
+    "etf:direct:status": "python3 scripts/etf_query.py status"
   },
   "engines": {
     "node": ">=22.22.0"
